@@ -19,6 +19,7 @@ Default listen `:8080`. See [`docs/feature.md`](docs/feature.md) for the planned
 
 - `GET /healthz` — liveness
 - `GET /readyz` — readiness
+- `GET /version` — build version as JSON (`{"version":"..."}`), no auth
 
 ## Documentation
 

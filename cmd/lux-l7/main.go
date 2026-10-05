@@ -12,6 +12,7 @@ import (
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/proxy"
+	"github.com/denisitpro/lux-l7/internal/version"
 )
 
 func main() {
@@ -23,6 +24,8 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(logger)
+
+	logger.Info("starting", "version", version.Build)
 
 	if !cfg.AuthEnabled {
 		logger.Warn("auth disabled: do not expose this configuration on the public internet")
@@ -45,6 +48,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.HandleFunc("GET /version", version.Handler)
 	mux.Handle("/", proxyHandler)
 
 	srv := &http.Server{
