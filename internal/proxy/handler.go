@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -68,7 +67,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
 		Rewrite:   h.rewrite,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			h.log.Error("upstream", "err", err, "path", r.URL.Path)
-			writeJSON(w, http.StatusBadGateway, "bad_gateway", "upstream request failed")
+			WriteJSON(w, http.StatusBadGateway, "bad_gateway", "upstream request failed")
 		},
 	}
 	h.proxy = rp
@@ -78,26 +77,26 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	t, err := parseTarget(r, h.cfg.UpstreamScheme)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, "bad_target", err.Error())
+		WriteJSON(w, http.StatusBadRequest, "bad_target", err.Error())
 		return
 	}
 	if !h.policy.Allowed(t.host) {
-		writeJSON(w, http.StatusForbidden, "forbidden", "upstream host not allowed")
+		WriteJSON(w, http.StatusForbidden, "forbidden", "upstream host not allowed")
 		return
 	}
 	token := r.Header.Get(headers.ProxyToken)
 	if !h.auth.Authorize(token, t.host) {
-		writeJSON(w, http.StatusUnauthorized, "unauthorized", "missing or invalid proxy token")
+		WriteJSON(w, http.StatusUnauthorized, "unauthorized", "missing or invalid proxy token")
 		return
 	}
 
-	if err := limitBody(w, r, h.cfg.UpstreamMaxBytes); err != nil {
-		writeJSON(w, http.StatusRequestEntityTooLarge, "body_too_large", err.Error())
+	if err := LimitBody(w, r, h.cfg.UpstreamMaxBytes); err != nil {
+		WriteJSON(w, http.StatusRequestEntityTooLarge, "body_too_large", err.Error())
 		return
 	}
 
 	r = r.Clone(r.Context())
-	stripRoutingHeaders(r.Header)
+	StripRoutingHeaders(r.Header)
 
 	ctx := context.WithValue(r.Context(), targetKey, t)
 	h.proxy.ServeHTTP(w, r.WithContext(ctx))
@@ -111,7 +110,7 @@ func (h *Handler) rewrite(pr *httputil.ProxyRequest) {
 	pr.Out.URL.Scheme = t.scheme
 	pr.Out.URL.Host = t.host
 	pr.Out.Host = t.host
-	stripRoutingHeaders(pr.Out.Header)
+	StripRoutingHeaders(pr.Out.Header)
 }
 
 func parseTarget(r *http.Request, defaultScheme string) (target, error) {
@@ -142,27 +141,4 @@ func parseTarget(r *http.Request, defaultScheme string) (target, error) {
 	}
 
 	return target{scheme: scheme, host: rawHost}, nil
-}
-
-func stripRoutingHeaders(h http.Header) {
-	h.Del(headers.TargetHost)
-	h.Del(headers.TargetScheme)
-	h.Del(headers.ProxyToken)
-}
-
-func writeJSON(w http.ResponseWriter, status int, code, detail string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": code, "detail": detail})
-}
-
-func limitBody(w http.ResponseWriter, r *http.Request, max int64) error {
-	if max <= 0 || r.Body == nil || r.Body == http.NoBody {
-		return nil
-	}
-	if r.ContentLength > 0 && r.ContentLength > max {
-		return errors.New("request body too large")
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, max)
-	return nil
 }

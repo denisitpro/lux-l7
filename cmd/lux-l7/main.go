@@ -12,6 +12,7 @@ import (
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/proxy"
+	"github.com/denisitpro/lux-l7/internal/relay"
 	"github.com/denisitpro/lux-l7/internal/version"
 )
 
@@ -27,17 +28,24 @@ func main() {
 
 	logger.Info("starting", "version", version.Build)
 
-	if !cfg.AuthEnabled {
+	var appHandler http.Handler
+	switch cfg.ProxyMode {
+	case config.ProxyModeRoute:
+		logger.Info("proxy mode", "mode", "route", "routes", len(cfg.Routes))
+		appHandler = relay.New(cfg, cfg.Routes, logger, relay.Options{})
+	default:
+		logger.Info("proxy mode", "mode", "header")
+		authValidator, err := auth.New(cfg)
+		if err != nil {
+			logger.Error("auth", "err", err)
+			os.Exit(1)
+		}
+		appHandler = proxy.New(cfg, authValidator, logger)
+	}
+
+	if cfg.ProxyMode == config.ProxyModeHeader && !cfg.AuthEnabled {
 		logger.Warn("auth disabled: do not expose this configuration on the public internet")
 	}
-
-	authValidator, err := auth.New(cfg)
-	if err != nil {
-		logger.Error("auth", "err", err)
-		os.Exit(1)
-	}
-
-	proxyHandler := proxy.New(cfg, authValidator, logger)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -49,7 +57,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /version", version.Handler)
-	mux.Handle("/", proxyHandler)
+	mux.Handle("/", appHandler)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

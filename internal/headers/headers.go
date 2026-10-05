@@ -5,4 +5,5 @@ const (
 	TargetHost   = "X-L7-Target-Host"
 	TargetScheme = "X-L7-Target-Scheme"
 	ProxyToken   = "X-L7-Proxy-Token"
+	Hops         = "X-L7-Hops"
 )
