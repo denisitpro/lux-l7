@@ -1,6 +1,6 @@
 # Feature list
 
-> Status: living · Last verified: 2026-10-05 · [AI - claude-sonnet-5-5]
+> Status: living · Last verified: 2026-10-05 · [AI - composer-2.5]
 
 L7 egress proxy for mobile and backend API traffic: one stable entrypoint outside restrictive networks; upstream host chosen per request instead of a static ingress `externalName` per target.
 
@@ -14,6 +14,7 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 - Routing headers stripped before the upstream request.
 - Auth **disabled by default** for local and integration tests.
 - Single static binary, container image (`Dockerfile`), CI (`.github/workflows/ci.yml`: `go test -race`) and image release (`docker-release.yml`), Dependabot.
+- **Route mode** (`PROXY_MODE=route`): static `ROUTES` table (host + path prefix → upstream origin). Client `X-L7-*` routing headers are ignored. Loop guard via `X-L7-Hops` / `ROUTE_MAX_HOPS`. `/healthz`, `/readyz`, `/version` stay local.
 
 ## Planned — core proxy
 
@@ -33,11 +34,38 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 
 | Variable | Role |
 |---|---|
-| `UPSTREAM_ALLOW_HOSTS` / `UPSTREAM_ALLOW_SUFFIXES` / `UPSTREAM_DENY_HOSTS` | Upstream policy |
+| `UPSTREAM_ALLOW_HOSTS` / `UPSTREAM_ALLOW_SUFFIXES` / `UPSTREAM_DENY_HOSTS` | Upstream policy (header mode only) |
 | `UPSTREAM_DEFAULT_SCHEME`, `UPSTREAM_TIMEOUT`, `UPSTREAM_MAX_BYTES` | Defaults and limits |
-| `AUTH_ENABLED`, `AUTH_MODE`, `PROXY_AUTH_TOKEN`, `PROXY_AUTH_HOST_MAP` | Auth |
+| `AUTH_ENABLED`, `AUTH_MODE`, `PROXY_AUTH_TOKEN`, `PROXY_AUTH_HOST_MAP` | Auth (header mode only) |
+| `PROXY_MODE` | `header` (default) or `route` |
+| `ROUTES` | JSON route array (required when `PROXY_MODE=route`) |
+| `ROUTE_MAX_HOPS` | Max `X-L7-Hops` before `508 loop_detected` (default `1`) |
 
 Defaults: [`.env.example`](../.env.example).
+
+### Route mode
+
+Example `ROUTES` for regional relay (scenario A: `/location1` → core) plus local paths (scenario B: `/local` → local service, catch-all → core):
+
+```json
+[
+  {"host":"example.com","path_prefix":"/local","upstream":"http://127.0.0.1:9001","rewrite_prefix":"/"},
+  {"host":"example.com","path_prefix":"/location1","upstream":"https://origin.example.com:443","rewrite_prefix":"/"},
+  {"host":"example.com","path_prefix":"/","upstream":"https://origin.example.com:443"}
+]
+```
+
+`host` is exact or a suffix (`.example.com`). `path_prefix` matches on a segment boundary; `/` matches all paths. First match wins. Unmatched requests return `404` / `no_route`.
+
+Host and SNI rule (upstreams are typically Cloudflare-fronted, which rejects SNI that differs from `Host`):
+
+- The outgoing `Host` is fixed per route: `host_header` if set, else the route `host` when it is an exact name. An http route with a suffix `host` and no `host_header` passes the incoming `Host` through.
+- For https upstreams the TLS SNI always equals the outgoing `Host` (without port), unless `tls_server_name` overrides it; an override that differs from the `Host` logs a startup warning.
+- Each route has its own connection pool (never shared, even for the same `upstream`), so a connection is never reused for a different `Host`.
+- An https route with a suffix `host` requires `host_header`; otherwise startup fails.
+- Encoded paths are preserved: `%2F` is not decoded on the way to the upstream, with or without `rewrite_prefix`.
+- `CONNECT` is rejected with `405` / `method_not_allowed` (tunnel mode is tracked in [#23](https://github.com/denisitpro/lux-l7/issues/23)).
+- Auth is not supported in route mode: `AUTH_ENABLED=true` fails at startup. `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES` and `UPSTREAM_DENY_HOSTS` are ignored (startup warning).
 
 ## Planned — cloud native
 

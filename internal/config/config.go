@@ -11,9 +11,13 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+
+	"github.com/denisitpro/lux-l7/internal/route"
 )
 
 const (
+	defaultProxyMode         = "header"
+	defaultRouteMaxHops      = 1
 	defaultLogLevel          = "info"
 	defaultHTTPAddr          = ":8080"
 	defaultReadHeaderTimeout = 5 * time.Second
@@ -24,6 +28,14 @@ const (
 	defaultUpstreamTimeout   = 30 * time.Second
 	defaultUpstreamMaxBytes  = 32 << 20
 	defaultUpstreamScheme    = "https"
+)
+
+// ProxyMode selects header-based or static route-table forwarding.
+type ProxyMode string
+
+const (
+	ProxyModeHeader ProxyMode = "header"
+	ProxyModeRoute  ProxyMode = "route"
 )
 
 // AuthMode selects how proxy tokens are validated.
@@ -43,6 +55,10 @@ type Config struct {
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
+
+	ProxyMode    ProxyMode
+	Routes       []route.Route
+	RouteMaxHops int
 
 	UpstreamTimeout  time.Duration
 	UpstreamMaxBytes int64
@@ -64,8 +80,21 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	mode := ProxyMode(strings.ToLower(envOr("PROXY_MODE", defaultProxyMode)))
+	routesRaw := strings.TrimSpace(os.Getenv("ROUTES"))
+	routeMaxHops := defaultRouteMaxHops
+	if raw := strings.TrimSpace(os.Getenv("ROUTE_MAX_HOPS")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("ROUTE_MAX_HOPS: %w", err)
+		}
+		routeMaxHops = n
+	}
+
 	cfg := Config{
 		HTTPAddr:          envOr("HTTP_ADDR", defaultHTTPAddr),
+		ProxyMode:         mode,
+		RouteMaxHops:      routeMaxHops,
 		ReadHeaderTimeout: defaultReadHeaderTimeout,
 		ReadTimeout:       defaultReadTimeout,
 		WriteTimeout:      defaultWriteTimeout,
@@ -92,7 +121,7 @@ func Load() (Config, error) {
 	if err := fillDurations(&cfg); err != nil {
 		return Config{}, err
 	}
-	if err := validate(cfg); err != nil {
+	if err := validate(&cfg, routesRaw); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -148,7 +177,30 @@ func fillDurations(cfg *Config) error {
 	return nil
 }
 
-func validate(cfg Config) error {
+func validate(cfg *Config, routesRaw string) error {
+	switch cfg.ProxyMode {
+	case ProxyModeHeader, ProxyModeRoute:
+	default:
+		return fmt.Errorf("PROXY_MODE must be header or route, got %q", cfg.ProxyMode)
+	}
+	if cfg.RouteMaxHops < 1 {
+		return fmt.Errorf("ROUTE_MAX_HOPS must be >= 1, got %d", cfg.RouteMaxHops)
+	}
+	if cfg.ProxyMode == ProxyModeHeader {
+		if routesRaw != "" {
+			return fmt.Errorf("ROUTES must not be set when PROXY_MODE=header")
+		}
+	} else {
+		if routesRaw == "" {
+			return fmt.Errorf("ROUTES is required when PROXY_MODE=route")
+		}
+		routes, err := route.ParseJSON(routesRaw)
+		if err != nil {
+			return err
+		}
+		cfg.Routes = routes
+	}
+
 	switch cfg.UpstreamScheme {
 	case "http", "https":
 	default:
@@ -159,13 +211,19 @@ func validate(cfg Config) error {
 	default:
 		return fmt.Errorf("AUTH_MODE must be instance or per_host, got %q", cfg.AuthMode)
 	}
+	if cfg.ProxyMode == ProxyModeRoute && cfg.AuthEnabled {
+		return fmt.Errorf("auth is not supported in route mode: unset AUTH_ENABLED")
+	}
 	if cfg.AuthEnabled && cfg.AuthMode == AuthModeInstance && cfg.InstanceToken == "" {
 		return fmt.Errorf("AUTH_ENABLED with AUTH_MODE=instance requires PROXY_AUTH_TOKEN")
 	}
 	if cfg.AuthEnabled && cfg.AuthMode == AuthModePerHost && cfg.HostTokenJSON == "" {
 		return fmt.Errorf("AUTH_ENABLED with AUTH_MODE=per_host requires PROXY_AUTH_HOST_MAP")
 	}
-	if len(cfg.AllowHosts) == 0 && len(cfg.AllowSuffixes) == 0 {
+	if cfg.ProxyMode == ProxyModeRoute && (len(cfg.AllowHosts) > 0 || len(cfg.AllowSuffixes) > 0 || len(cfg.DenyHosts) > 0) {
+		slog.Default().Warn("UPSTREAM_ALLOW_HOSTS, UPSTREAM_ALLOW_SUFFIXES and UPSTREAM_DENY_HOSTS are ignored in route mode")
+	}
+	if cfg.ProxyMode == ProxyModeHeader && len(cfg.AllowHosts) == 0 && len(cfg.AllowSuffixes) == 0 {
 		slog.Default().Warn("upstream allow-list empty: any host may be targeted unless UPSTREAM_DENY_HOSTS blocks it")
 	}
 	return nil
