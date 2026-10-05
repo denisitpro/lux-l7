@@ -51,7 +51,7 @@ func TestForwardToUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, _ := io.ReadAll(res.Body)
 	if res.StatusCode != http.StatusOK || string(body) != "pong" {
 		t.Fatalf("status=%d body=%q", res.StatusCode, body)
@@ -69,7 +69,7 @@ func TestMissingTargetHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d", res.StatusCode)
 	}

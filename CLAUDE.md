@@ -30,6 +30,10 @@ go run ./cmd/lux-l7
 - Feature list and protocol: [`docs/feature.md`](docs/feature.md)
 - Doc index: [`docs/README.md`](docs/README.md)
 
+## Versioning
+
+Release = git tag on `main`, plain semver without `v` (`0.2.0`), same as the sibling Go service. Pre-alpha line: bump the patch (`0.2.1`, `0.2.2`, …) per release until the owner declares the alpha ready. A tag push publishes the image via `.github/workflows/docker-release.yml`.
+
 ## Hard rules
 
 - Do not run `kubectl apply` or cluster mutations unless the owner explicitly approves in chat.
