@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+.env
+.env.*
+!.env.example
+test.env
+*.remote.env
+data/
+*.log
+.DS_Store
+
+# Go build output
+/bin/
+/cover.out
+*.test
+
+# Editor
+.idea/
+.vscode/
