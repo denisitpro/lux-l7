@@ -37,5 +37,5 @@ Release = git tag on `main`, plain semver without `v` (`0.2.0`), same as the sib
 ## Hard rules
 
 - Do not run `kubectl apply` or cluster mutations unless the owner explicitly approves in chat.
-- Git flow is the agent's job end to end, no asking: work on a `<issue>-<desc>` branch, commit, push, open the PR (`Closes #N`), wait for CI green, merge it yourself (`gh pr merge --merge --delete-branch`), then switch the local tree back to an up-to-date `main`. This overrides the global "only the owner merges" rule for this repo (owner's order, 2026-10-05).
-- Never merge red CI or unreviewed subagent/Cursor output: the orchestrator reads the diff and runs `make test` / `make lint` first.
+- Git flow is the agent's job end to end, no asking: work on a `<issue>-<desc>` branch, commit, push, open the PR (`Closes #N`), merge it yourself (`gh pr merge --merge --delete-branch`), switch the local tree back to an up-to-date `main`, then confirm the `ci` run on `main` is green (CI runs only on push to `main`, not on PRs; a red run is fixed right away in a new branch). This overrides the global "only the owner merges" rule for this repo (owner's order, 2026-10-05).
+- Never merge unreviewed subagent/Cursor output: before merging, the orchestrator reads the diff and runs `make test` / `make lint` locally; that is the pre-merge gate.
