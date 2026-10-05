@@ -65,7 +65,7 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		HTTPAddr:         envOr("HTTP_ADDR", defaultHTTPAddr),
+		HTTPAddr:          envOr("HTTP_ADDR", defaultHTTPAddr),
 		ReadHeaderTimeout: defaultReadHeaderTimeout,
 		ReadTimeout:       defaultReadTimeout,
 		WriteTimeout:      defaultWriteTimeout,

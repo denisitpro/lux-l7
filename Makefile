@@ -1,5 +1,6 @@
 .DEFAULT_GOAL := help
 
+# Single source for the Go toolchain. Dockerfile, compose and CI read this.
 GO_VERSION := $(shell tr -d '[:space:]' < version.txt)
 export GO_VERSION
 
@@ -7,7 +8,7 @@ export GO_VERSION
 
 help:
 	@echo "run              go run ./cmd/lux-l7"
-	@echo "test             go test ./..."
+	@echo "test             fast unit tests (go test -race ./...)"
 	@echo "lint             golangci-lint"
 	@echo "check-go-version assert go.mod matches version.txt"
 	@echo "docker-build     docker build (GO_VERSION from version.txt)"
@@ -16,13 +17,17 @@ run:
 	go run ./cmd/lux-l7
 
 test:
-	go test ./...
+	go test -race ./...
 
 lint:
 	PATH="$$(go env GOPATH)/bin:$$PATH" golangci-lint run ./...
 
 check-go-version:
-	@test "$$(go env GOVERSION)" = "go$(GO_VERSION)"
+	@mod="$$(sed -n 's/^go //p' go.mod | head -1 | tr -d '[:space:]')" && \
+	if [ "$$mod" != "$(GO_VERSION)" ]; then \
+		echo "go.mod ($$mod) != version.txt ($(GO_VERSION))" >&2; \
+		exit 1; \
+	fi
 
 docker-build: check-go-version
 	docker build \

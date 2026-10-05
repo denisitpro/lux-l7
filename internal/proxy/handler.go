@@ -29,11 +29,11 @@ type target struct {
 
 // Handler forwards HTTP requests to a client-selected upstream.
 type Handler struct {
-	cfg       config.Config
-	policy    *policy.Policy
-	auth      *auth.Validator
-	proxy     *httputil.ReverseProxy
-	log       *slog.Logger
+	cfg    config.Config
+	policy *policy.Policy
+	auth   *auth.Validator
+	proxy  *httputil.ReverseProxy
+	log    *slog.Logger
 }
 
 // New builds the L7 proxy handler.
@@ -49,12 +49,12 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:            256,
-		IdleConnTimeout:         90 * time.Second,
-		TLSHandshakeTimeout:     10 * time.Second,
-		ExpectContinueTimeout:   1 * time.Second,
-		ResponseHeaderTimeout:   cfg.UpstreamTimeout,
-		TLSClientConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
+		MaxIdleConns:          256,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: cfg.UpstreamTimeout,
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 
 	h := &Handler{
