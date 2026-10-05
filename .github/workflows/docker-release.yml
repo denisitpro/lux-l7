@@ -1,0 +1,83 @@
+name: docker-build
+
+# Build & push lux-l7 to Docker Hub:
+#   denisitpro/lux-l7:TAG
+#   denisitpro/lux-l7:TAG-SHORTSHA
+#   denisitpro/lux-l7:latest
+#
+# Publish only from git tags (and optional workflow_dispatch).
+# Go toolchain version comes from version.txt (must match go.mod).
+# Required repo secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN.
+
+on:
+  push:
+    tags:
+      - "**"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image version tag (e.g. 0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version and Go toolchain
+        id: meta
+        run: |
+          set -euo pipefail
+          SHORT_SHA="$(git rev-parse --short=12 HEAD)"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            VERSION="${VERSION#v}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            VERSION="${VERSION#v}"
+          else
+            echo "::error::docker publish runs only on git tags or workflow_dispatch" >&2
+            exit 1
+          fi
+          GO_VERSION="$(tr -d '[:space:]' < version.txt)"
+          MOD="$(sed -n 's/^go //p' go.mod | head -1 | tr -d '[:space:]')"
+          if [ -z "$GO_VERSION" ] || [ -z "$VERSION" ] || [ -z "$SHORT_SHA" ]; then
+            echo "::error::empty GO_VERSION, image version, or SHORT_SHA" >&2
+            exit 1
+          fi
+          if [ "$GO_VERSION" != "$MOD" ]; then
+            echo "::error::go.mod ($MOD) != version.txt ($GO_VERSION)" >&2
+            exit 1
+          fi
+          BUILD_ID="${VERSION}-${SHORT_SHA}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "go_version=$GO_VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          build-args: |
+            GO_VERSION=${{ steps.meta.outputs.go_version }}
+            BIN=lux-l7
+            BUILD_ID=${{ steps.meta.outputs.build_id }}
+          tags: |
+            denisitpro/lux-l7:${{ steps.meta.outputs.version }}
+            denisitpro/lux-l7:${{ steps.meta.outputs.version }}-${{ steps.meta.outputs.short_sha }}
+            denisitpro/lux-l7:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
