@@ -50,12 +50,22 @@ Example `ROUTES` for regional relay (scenario A: `/location1` → core) plus loc
 ```json
 [
   {"host":"example.com","path_prefix":"/local","upstream":"http://127.0.0.1:9001","rewrite_prefix":"/"},
-  {"host":"example.com","path_prefix":"/location1","upstream":"https://origin.example.com:443","host_header":"","tls_server_name":"","rewrite_prefix":"/"},
+  {"host":"example.com","path_prefix":"/location1","upstream":"https://origin.example.com:443","rewrite_prefix":"/"},
   {"host":"example.com","path_prefix":"/","upstream":"https://origin.example.com:443"}
 ]
 ```
 
 `host` is exact or a suffix (`.example.com`). `path_prefix` matches on a segment boundary; `/` matches all paths. First match wins. Unmatched requests return `404` / `no_route`.
+
+Host and SNI rule (upstreams are typically Cloudflare-fronted, which rejects SNI that differs from `Host`):
+
+- The outgoing `Host` is fixed per route: `host_header` if set, else the route `host` when it is an exact name. An http route with a suffix `host` and no `host_header` passes the incoming `Host` through.
+- For https upstreams the TLS SNI always equals the outgoing `Host` (without port), unless `tls_server_name` overrides it; an override that differs from the `Host` logs a startup warning.
+- Each route has its own connection pool (never shared, even for the same `upstream`), so a connection is never reused for a different `Host`.
+- An https route with a suffix `host` requires `host_header`; otherwise startup fails.
+- Encoded paths are preserved: `%2F` is not decoded on the way to the upstream, with or without `rewrite_prefix`.
+- `CONNECT` is rejected with `405` / `method_not_allowed` (tunnel mode is tracked in [#23](https://github.com/denisitpro/lux-l7/issues/23)).
+- Auth is not supported in route mode: `AUTH_ENABLED=true` fails at startup. `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES` and `UPSTREAM_DENY_HOSTS` are ignored (startup warning).
 
 ## Planned — cloud native
 

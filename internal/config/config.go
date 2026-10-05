@@ -211,11 +211,17 @@ func validate(cfg *Config, routesRaw string) error {
 	default:
 		return fmt.Errorf("AUTH_MODE must be instance or per_host, got %q", cfg.AuthMode)
 	}
+	if cfg.ProxyMode == ProxyModeRoute && cfg.AuthEnabled {
+		return fmt.Errorf("auth is not supported in route mode: unset AUTH_ENABLED")
+	}
 	if cfg.AuthEnabled && cfg.AuthMode == AuthModeInstance && cfg.InstanceToken == "" {
 		return fmt.Errorf("AUTH_ENABLED with AUTH_MODE=instance requires PROXY_AUTH_TOKEN")
 	}
 	if cfg.AuthEnabled && cfg.AuthMode == AuthModePerHost && cfg.HostTokenJSON == "" {
 		return fmt.Errorf("AUTH_ENABLED with AUTH_MODE=per_host requires PROXY_AUTH_HOST_MAP")
+	}
+	if cfg.ProxyMode == ProxyModeRoute && (len(cfg.AllowHosts) > 0 || len(cfg.AllowSuffixes) > 0 || len(cfg.DenyHosts) > 0) {
+		slog.Default().Warn("UPSTREAM_ALLOW_HOSTS, UPSTREAM_ALLOW_SUFFIXES and UPSTREAM_DENY_HOSTS are ignored in route mode")
 	}
 	if cfg.ProxyMode == ProxyModeHeader && len(cfg.AllowHosts) == 0 && len(cfg.AllowSuffixes) == 0 {
 		slog.Default().Warn("upstream allow-list empty: any host may be targeted unless UPSTREAM_DENY_HOSTS blocks it")

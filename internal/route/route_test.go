@@ -137,3 +137,35 @@ func mustParse(t *testing.T, raw string) []route.Route {
 	}
 	return r
 }
+
+func TestHTTPSSuffixHostRequiresHostHeader(t *testing.T) {
+	_, err := route.ParseJSON(`[{"host":".example.com","path_prefix":"/","upstream":"https://127.0.0.1:443"}]`)
+	if err == nil || !strings.Contains(err.Error(), "host_header") {
+		t.Fatalf("expected host_header error, got %v", err)
+	}
+	rs := mustParse(t, `[{"host":".example.com","path_prefix":"/","upstream":"https://127.0.0.1:443","host_header":"origin.example.com"}]`)
+	if rs[0].OutHost != "origin.example.com" || rs[0].ServerName != "origin.example.com" {
+		t.Fatalf("out=%q sni=%q", rs[0].OutHost, rs[0].ServerName)
+	}
+	rs = mustParse(t, `[{"host":".example.com","path_prefix":"/","upstream":"http://127.0.0.1:80"}]`)
+	if rs[0].OutHost != "" || rs[0].ServerName != "" {
+		t.Fatalf("out=%q sni=%q", rs[0].OutHost, rs[0].ServerName)
+	}
+}
+
+func TestServerNameResolution(t *testing.T) {
+	rs := mustParse(t, `[
+		{"host":"example.com","path_prefix":"/","upstream":"https://127.0.0.1:443"},
+		{"host":"example.com","path_prefix":"/a","upstream":"https://127.0.0.1:443","host_header":"a.example.com:8443"},
+		{"host":"example.com","path_prefix":"/b","upstream":"https://127.0.0.1:443","tls_server_name":"sni.example.com"}
+	]`)
+	if rs[0].OutHost != "example.com" || rs[0].ServerName != "example.com" {
+		t.Fatalf("0: %+v", rs[0])
+	}
+	if rs[1].OutHost != "a.example.com:8443" || rs[1].ServerName != "a.example.com" {
+		t.Fatalf("1: %+v", rs[1])
+	}
+	if rs[2].OutHost != "example.com" || rs[2].ServerName != "sni.example.com" {
+		t.Fatalf("2: %+v", rs[2])
+	}
+}

@@ -58,3 +58,23 @@ func TestRouteModeLoad(t *testing.T) {
 		t.Fatalf("routes=%d hops=%d", len(cfg.Routes), cfg.RouteMaxHops)
 	}
 }
+
+func TestRouteModeRejectsAuth(t *testing.T) {
+	t.Setenv("PROXY_MODE", "route")
+	t.Setenv("ROUTES", `[{"host":"example.com","path_prefix":"/","upstream":"http://127.0.0.1:9"}]`)
+	t.Setenv("AUTH_ENABLED", "true")
+	t.Setenv("PROXY_AUTH_TOKEN", "x")
+	_, err := config.Load()
+	if err == nil || !strings.Contains(err.Error(), "not supported in route mode") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRouteModeHTTPSSuffixNeedsHostHeader(t *testing.T) {
+	t.Setenv("PROXY_MODE", "route")
+	t.Setenv("ROUTES", `[{"host":".example.com","path_prefix":"/","upstream":"https://127.0.0.1:443"}]`)
+	_, err := config.Load()
+	if err == nil || !strings.Contains(err.Error(), "host_header") {
+		t.Fatalf("got %v", err)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -53,6 +54,8 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 				h.rewrite(pr, idx)
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+				// Minimal logging (#24): no client or request data. Transport errors name
+				// the dial address and the failure, never the request path or query.
 				h.log.Error("upstream", "err", err, "route", idx, "upstream", rt.Upstream.String())
 				proxy.WriteJSON(w, http.StatusBadGateway, "bad_gateway", "upstream request failed")
 			},
@@ -62,6 +65,11 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodConnect {
+		// CONNECT tunnels are a separate mode (#23); never relay them as plain requests.
+		proxy.WriteJSON(w, http.StatusMethodNotAllowed, "method_not_allowed", "CONNECT is not supported in route mode")
+		return
+	}
 	idx := route.Match(h.routes, r.Host, r.URL.Path)
 	if idx < 0 {
 		proxy.WriteJSON(w, http.StatusNotFound, "no_route", "no matching route")
@@ -103,18 +111,18 @@ func parseHops(raw string) (int, error) {
 func (h *Handler) rewrite(pr *httputil.ProxyRequest, idx int) {
 	rt := h.routes[idx]
 
-	outPath := pr.In.URL.Path
+	outPath, outRaw := pr.In.URL.Path, pr.In.URL.RawPath
 	if rt.RewritePrefix != "" {
-		outPath = route.RewritePath(outPath, rt.PathPrefix, rt.RewritePrefix)
+		outPath, outRaw = rewriteEscaped(pr.In.URL, rt)
 	}
 	pr.Out.URL.Scheme = rt.Upstream.Scheme
 	pr.Out.URL.Host = rt.Upstream.Host
 	pr.Out.URL.Path = outPath
-	pr.Out.URL.RawPath = ""
+	pr.Out.URL.RawPath = outRaw
 	pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 
-	if rt.HostHeader != "" {
-		pr.Out.Host = rt.HostHeader
+	if rt.OutHost != "" {
+		pr.Out.Host = rt.OutHost
 	} else {
 		pr.Out.Host = pr.In.Host
 	}
@@ -133,4 +141,18 @@ func (h *Handler) rewrite(pr *httputil.ProxyRequest, idx int) {
 		}
 	}
 	pr.Out.Header.Set("X-Forwarded-Proto", proto)
+}
+
+// rewriteEscaped applies rewrite_prefix on the escaped path so encoded
+// characters in the remainder (e.g. %2F) survive. It falls back to the decoded
+// path when the escaped form cannot be rewritten consistently.
+func rewriteEscaped(u *url.URL, rt route.Route) (path, raw string) {
+	escaped := u.EscapedPath()
+	if route.PathMatches(rt.PathPrefix, escaped) {
+		rewritten := route.RewritePath(escaped, rt.PathPrefix, rt.RewritePrefix)
+		if decoded, err := url.PathUnescape(rewritten); err == nil {
+			return decoded, rewritten
+		}
+	}
+	return route.RewritePath(u.Path, rt.PathPrefix, rt.RewritePrefix), ""
 }
