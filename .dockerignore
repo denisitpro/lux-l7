@@ -1,0 +1,13 @@
+.git
+.cursor
+.github
+.env
+.env.*
+!.env.example
+*.local
+claude-memory
+docs
+**/*_test.go
+**/.DS_Store
+*.md
+.golangci.yml
