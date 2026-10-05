@@ -7,7 +7,7 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 ## Implemented
 
 - Env-based config, JSON logs, graceful shutdown.
-- `GET /healthz`, `GET /readyz`.
+- `GET /healthz`, `GET /readyz`, `GET /version` (unauthenticated, never proxied; JSON `{"version":"<build>"}`). The version is also logged once at startup (`starting`).
 - L7 reverse proxy: `X-L7-Target-Host`, optional `X-L7-Target-Scheme` (default from `UPSTREAM_DEFAULT_SCHEME`).
 - Upstream allow/deny via `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES`, `UPSTREAM_DENY_HOSTS`.
 - Auth optional (`AUTH_ENABLED=false` by default): `X-L7-Proxy-Token`, modes `instance` / `per_host`.
