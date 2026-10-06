@@ -71,14 +71,15 @@ With both allow lists empty every host is admitted (header mode logs a warning).
 | `path_prefix` | yes | Must start with `/`; matched on a segment boundary; `/` matches all. |
 | `upstream` | yes | `http` or `https` origin, host with optional port; no userinfo, path, query or fragment. |
 | `rewrite_prefix` | no | Replaces the matched prefix; must start with `/` when set. |
-| `host_header` | no | Fixed outgoing `Host`. Required for an https upstream with a suffix `host`. |
+| `host_header` | no | Outgoing `Host` (port kept as written). Defaults to the `upstream` authority (host plus port), not the route `host`; set it to the route host when the upstream expects the original site host. |
 | `tls_server_name` | no | SNI override, https upstreams only. Defaults to the outgoing `Host` without port. |
 
 ```json
 [
   {"host":"example.com","path_prefix":"/local","upstream":"http://127.0.0.1:9001","rewrite_prefix":"/"},
   {"host":"example.com","path_prefix":"/region1","upstream":"https://origin.example.com:443","rewrite_prefix":"/"},
-  {"host":"example.com","path_prefix":"/","upstream":"https://origin.example.com:443"}
+  {"host":"example.com","path_prefix":"/direct","upstream":"https://203.0.113.10:443","host_header":"example.com","rewrite_prefix":"/"},
+  {"host":".example.com","path_prefix":"/","upstream":"https://origin.example.com:443"}
 ]
 ```
 

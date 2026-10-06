@@ -120,11 +120,7 @@ func (h *Handler) rewrite(pr *httputil.ProxyRequest, idx int) {
 	pr.Out.URL.RawPath = outRaw
 	pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 
-	if rt.OutHost != "" {
-		pr.Out.Host = rt.OutHost
-	} else {
-		pr.Out.Host = pr.In.Host
-	}
+	pr.Out.Host = rt.OutHost
 
 	proxy.StripRoutingHeaders(pr.Out.Header)
 

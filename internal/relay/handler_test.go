@@ -34,7 +34,7 @@ func TestScenarioAHostPreserveAndRewrite(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	routes := mustRoutes(t, `[
-		{"host":"example.com","path_prefix":"/location1","upstream":"`+upstreamURL(upstream)+`","rewrite_prefix":"/"}
+		{"host":"example.com","path_prefix":"/location1","upstream":"`+upstreamURL(upstream)+`","host_header":"example.com","rewrite_prefix":"/"}
 	]`)
 	h := relay.New(testCfg(), routes, nil, relay.Options{})
 	srv := httptest.NewServer(h)
@@ -306,7 +306,7 @@ func TestTLSDefaultServerNameIsHost(t *testing.T) {
 	pool := x509.NewCertPool()
 	pool.AddCert(up.Certificate())
 
-	routes := mustRoutes(t, `[{"host":"example.com","path_prefix":"/","upstream":"https://`+up.Listener.Addr().String()+`"}]`)
+	routes := mustRoutes(t, `[{"host":"example.com","path_prefix":"/","upstream":"https://`+up.Listener.Addr().String()+`","host_header":"example.com"}]`)
 	srv := httptest.NewServer(relay.New(testCfg(), routes, nil, relay.Options{RootCAs: pool}))
 	t.Cleanup(srv.Close)
 
@@ -524,5 +524,24 @@ func TestUpstreamTimeout504(t *testing.T) {
 	res := doGet(t, srv.URL+"/", "example.com")
 	if res.StatusCode != http.StatusGatewayTimeout {
 		t.Fatalf("status=%d", res.StatusCode)
+	}
+}
+
+func TestDefaultHostIsUpstreamAuthority(t *testing.T) {
+	var seenHost, seenFwd string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHost, seenFwd = r.Host, r.Header.Get("X-Forwarded-Host")
+	}))
+	t.Cleanup(upstream.Close)
+
+	routes := mustRoutes(t, `[{"host":".example.com","path_prefix":"/","upstream":"`+upstreamURL(upstream)+`"}]`)
+	srv := httptest.NewServer(relay.New(testCfg(), routes, nil, relay.Options{}))
+	t.Cleanup(srv.Close)
+
+	if res := doGet(t, srv.URL+"/", "a.example.com"); res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+	if seenHost != upstream.Listener.Addr().String() || seenFwd != "a.example.com" {
+		t.Fatalf("host=%q fwd=%q", seenHost, seenFwd)
 	}
 }

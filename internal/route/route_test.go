@@ -138,34 +138,35 @@ func mustParse(t *testing.T, raw string) []route.Route {
 	return r
 }
 
-func TestHTTPSSuffixHostRequiresHostHeader(t *testing.T) {
-	_, err := route.ParseJSON(`[{"host":".example.com","path_prefix":"/","upstream":"https://127.0.0.1:443"}]`)
-	if err == nil || !strings.Contains(err.Error(), "host_header") {
-		t.Fatalf("expected host_header error, got %v", err)
-	}
-	rs := mustParse(t, `[{"host":".example.com","path_prefix":"/","upstream":"https://127.0.0.1:443","host_header":"origin.example.com"}]`)
-	if rs[0].OutHost != "origin.example.com" || rs[0].ServerName != "origin.example.com" {
+func TestHTTPSSuffixHostWithoutHostHeaderAccepted(t *testing.T) {
+	rs := mustParse(t, `[{"host":".example.com","path_prefix":"/","upstream":"https://origin.example.net:443"}]`)
+	if rs[0].OutHost != "origin.example.net:443" || rs[0].ServerName != "origin.example.net" {
 		t.Fatalf("out=%q sni=%q", rs[0].OutHost, rs[0].ServerName)
 	}
-	rs = mustParse(t, `[{"host":".example.com","path_prefix":"/","upstream":"http://127.0.0.1:80"}]`)
-	if rs[0].OutHost != "" || rs[0].ServerName != "" {
+	rs = mustParse(t, `[{"host":".example.com","path_prefix":"/","upstream":"http://origin.example.net:80"}]`)
+	if rs[0].OutHost != "origin.example.net:80" || rs[0].ServerName != "" {
 		t.Fatalf("out=%q sni=%q", rs[0].OutHost, rs[0].ServerName)
 	}
 }
 
 func TestServerNameResolution(t *testing.T) {
 	rs := mustParse(t, `[
-		{"host":"example.com","path_prefix":"/","upstream":"https://127.0.0.1:443"},
+		{"host":"example.com","path_prefix":"/","upstream":"https://origin.example.net"},
+		{"host":"example.com","path_prefix":"/p","upstream":"https://origin.example.net:8443"},
 		{"host":"example.com","path_prefix":"/a","upstream":"https://127.0.0.1:443","host_header":"a.example.com:8443"},
-		{"host":"example.com","path_prefix":"/b","upstream":"https://127.0.0.1:443","tls_server_name":"sni.example.com"}
+		{"host":"example.com","path_prefix":"/h","upstream":"https://127.0.0.1:443","host_header":"example.com"},
+		{"host":"example.com","path_prefix":"/b","upstream":"https://origin.example.net:443","tls_server_name":"sni.example.com"}
 	]`)
-	if rs[0].OutHost != "example.com" || rs[0].ServerName != "example.com" {
-		t.Fatalf("0: %+v", rs[0])
+	want := []struct{ out, sni string }{
+		{"origin.example.net", "origin.example.net"},
+		{"origin.example.net:8443", "origin.example.net"},
+		{"a.example.com:8443", "a.example.com"},
+		{"example.com", "example.com"},
+		{"origin.example.net:443", "sni.example.com"},
 	}
-	if rs[1].OutHost != "a.example.com:8443" || rs[1].ServerName != "a.example.com" {
-		t.Fatalf("1: %+v", rs[1])
-	}
-	if rs[2].OutHost != "example.com" || rs[2].ServerName != "sni.example.com" {
-		t.Fatalf("2: %+v", rs[2])
+	for i, w := range want {
+		if rs[i].OutHost != w.out || rs[i].ServerName != w.sni {
+			t.Fatalf("%d: out=%q sni=%q, want %+v", i, rs[i].OutHost, rs[i].ServerName, w)
+		}
 	}
 }

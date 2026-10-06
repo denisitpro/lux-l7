@@ -19,8 +19,7 @@ type Route struct {
 	TLSServerName string
 	RewritePrefix string
 
-	// OutHost is the fixed outgoing Host; empty only for http + suffix host
-	// without host_header, where the incoming Host is passed through.
+	// OutHost is the fixed outgoing Host: host_header, else the upstream authority.
 	OutHost string
 	// ServerName is the TLS SNI for https upstreams (empty for http).
 	ServerName string
@@ -105,18 +104,16 @@ func validateRoute(i int, item routeJSON) (Route, error) {
 	}
 
 	// One route has one connection pool, so the outgoing Host (and therefore the
-	// SNI) must be fixed per route: a suffix host with https would vary Host per
-	// request and break SNI == Host, which Cloudflare-fronted upstreams enforce.
-	// host_header keeps its port (it is sent as-is); SNI never carries one.
-	outHost := strings.ToLower(hostHeader)
-	if outHost == "" && !strings.HasPrefix(host, ".") {
-		outHost = host
+	// SNI) must be fixed per route: a Host varying per request would break
+	// SNI == Host, which Cloudflare-fronted upstreams enforce. The default is the
+	// upstream authority as written (host plus port); host_header overrides it and,
+	// like the default, keeps its port (it is sent as-is); SNI never carries one.
+	outHost := strings.ToLower(u.Host)
+	if hostHeader != "" {
+		outHost = strings.ToLower(hostHeader)
 	}
 	serverName := ""
 	if u.Scheme == "https" {
-		if outHost == "" {
-			return Route{}, fmt.Errorf("%s: suffix host with https upstream requires host_header", prefix)
-		}
 		hostName := normalizeRequestHost(outHost)
 		serverName = hostName
 		if tlsName != "" {
