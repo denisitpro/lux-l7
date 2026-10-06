@@ -105,8 +105,6 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r = r.Clone(r.Context())
-	r.Header.Set(headers.Hops, strconv.Itoa(inHops+1))
 	h.proxies[idx].ServeHTTP(w, r)
 }
 
@@ -138,6 +136,11 @@ func (h *Handler) rewrite(pr *httputil.ProxyRequest, idx int) {
 	pr.Out.Host = rt.OutHost
 
 	proxy.StripRoutingHeaders(pr.Out.Header)
+	// Set here, on the outgoing request: ReverseProxy removes headers named in the
+	// client's Connection header before Rewrite, so a counter set earlier could be
+	// stripped by the client. The inbound value was validated in ServeHTTP.
+	inHops, _ := parseHops(pr.In.Header.Get(headers.Hops))
+	pr.Out.Header.Set(headers.Hops, strconv.Itoa(inHops+1))
 
 	// Client IP forwarding (X-Forwarded-For); trusted-hop handling is #8.
 	pr.SetXForwarded()

@@ -204,6 +204,40 @@ func TestHops(t *testing.T) {
 	}
 }
 
+// A client cannot strip the counter by naming it in Connection.
+func TestHopsSurviveConnectionHeader(t *testing.T) {
+	var seenHops string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHops = r.Header.Get(headers.Hops)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+
+	routes := mustRoutes(t, `[{"host":"example.com","path_prefix":"/","upstream":"`+upstreamURL(upstream)+`"}]`)
+	cfg := testCfg()
+	cfg.RouteMaxHops = 3
+	srv := httptest.NewServer(relay.New(cfg, routes, nil, relay.Options{}))
+	t.Cleanup(srv.Close)
+
+	for in, want := range map[string]string{"": "1", "1": "2"} {
+		seenHops = ""
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/", nil)
+		req.Host = "example.com"
+		req.Header.Set("Connection", headers.Hops)
+		if in != "" {
+			req.Header.Set(headers.Hops, in)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if seenHops != want {
+			t.Fatalf("inbound %q: upstream hops = %q, want %q", in, seenHops, want)
+		}
+	}
+}
+
 func TestForwardedAndStrippedHeaders(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get(headers.TargetHost) != "" || r.Header.Get(headers.ProxyToken) != "" {
