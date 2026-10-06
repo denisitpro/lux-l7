@@ -29,6 +29,8 @@ func TestBlocked(t *testing.T) {
 		"64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "64:ff9b::a00:1",
 		"2002:7f00:1::", "2002:a9fe:a9fe::1", "2002:c0a8:101::1",
 		"64:ff9b:1::1",
+		// IPv4-compatible IPv6 with a private embedded IPv4
+		"::7f00:1", "::a00:1", "::a9fe:a9fe", "::c0a8:101",
 	}
 	for _, s := range blocked {
 		if !egress.Blocked(netip.MustParseAddr(s)) {
@@ -45,6 +47,7 @@ func TestBlocked(t *testing.T) {
 		"::ffff:8.8.8.8",
 		// public embedded IPv4
 		"64:ff9b::808:808", "2002:808:808::1",
+		"::808:808",
 	}
 	for _, s := range allowed {
 		if egress.Blocked(netip.MustParseAddr(s)) {
