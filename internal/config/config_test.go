@@ -21,8 +21,33 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+func TestUpstreamGuardDefaultsAndPorts(t *testing.T) {
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UpstreamAllowPrivate {
+		t.Fatal("expected SSRF guard on by default")
+	}
+	if got := cfg.UpstreamAllowPorts; len(got) != 4 || got[0] != 80 || got[3] != 9443 {
+		t.Fatalf("default ports = %v", got)
+	}
+
+	t.Setenv("UPSTREAM_ALLOW_PORTS", "443, 8080")
+	cfg, err = config.Load()
+	if err != nil || len(cfg.UpstreamAllowPorts) != 2 || cfg.UpstreamAllowPorts[1] != 8080 {
+		t.Fatalf("ports = %v err=%v", cfg.UpstreamAllowPorts, err)
+	}
+	for _, bad := range []string{"abc", "0", "65536", "443,,x"} {
+		t.Setenv("UPSTREAM_ALLOW_PORTS", bad)
+		if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "UPSTREAM_ALLOW_PORTS") {
+			t.Fatalf("%q: expected error, got %v", bad, err)
+		}
+	}
+}
+
 func TestUnparsableBoolFailsLoad(t *testing.T) {
-	for _, key := range []string{"AUTH_ENABLED", "UPSTREAM_ALLOW_HTTP"} {
+	for _, key := range []string{"AUTH_ENABLED", "UPSTREAM_ALLOW_HTTP", "UPSTREAM_ALLOW_PRIVATE"} {
 		t.Run(key, func(t *testing.T) {
 			t.Setenv(key, "yes")
 			_, err := config.Load()

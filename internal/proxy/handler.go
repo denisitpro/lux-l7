@@ -14,6 +14,7 @@ import (
 
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/config"
+	"github.com/denisitpro/lux-l7/internal/egress"
 	"github.com/denisitpro/lux-l7/internal/headers"
 	"github.com/denisitpro/lux-l7/internal/policy"
 )
@@ -33,6 +34,7 @@ type Handler struct {
 	policy *policy.Policy
 	auth   *auth.Validator
 	proxy  *httputil.ReverseProxy
+	ports  map[int]struct{} // empty: no port restriction (config.Load always sets a default)
 	log    *slog.Logger
 }
 
@@ -43,11 +45,9 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
 	}
 	p := policy.New(cfg.AllowHosts, cfg.AllowSuffixes, cfg.DenyHosts)
 	tr := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		// No env proxy: the SSRF guard must see the target, not an HTTP_PROXY hop.
+		Proxy:                 nil,
+		DialContext:           egress.NewDialer(cfg.UpstreamAllowPrivate, 30*time.Second).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          256,
 		IdleConnTimeout:       90 * time.Second,
@@ -61,7 +61,11 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
 		cfg:    cfg,
 		policy: p,
 		auth:   v,
+		ports:  make(map[int]struct{}, len(cfg.UpstreamAllowPorts)),
 		log:    log,
+	}
+	for _, port := range cfg.UpstreamAllowPorts {
+		h.ports[port] = struct{}{}
 	}
 	rp := &httputil.ReverseProxy{
 		Transport: tr,
@@ -84,6 +88,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusForbidden, "forbidden", "upstream host not allowed")
 		return
 	}
+	if !h.portAllowed(t) {
+		WriteJSON(w, http.StatusForbidden, "forbidden", "upstream port not allowed")
+		return
+	}
 	token := r.Header.Get(headers.ProxyToken)
 	if !h.auth.Authorize(token, t.host) {
 		WriteJSON(w, http.StatusUnauthorized, "unauthorized", "missing or invalid proxy token")
@@ -100,6 +108,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.WithValue(r.Context(), targetKey, t)
 	h.proxy.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// portAllowed checks the target port; an absent port is the scheme default.
+func (h *Handler) portAllowed(t target) bool {
+	if len(h.ports) == 0 {
+		return true
+	}
+	port := 443
+	if t.scheme == "http" {
+		port = 80
+	}
+	if _, p, err := net.SplitHostPort(t.host); err == nil {
+		port, _ = strconv.Atoi(p) // parseTarget already validated it
+	}
+	_, ok := h.ports[port]
+	return ok
 }
 
 func (h *Handler) rewrite(pr *httputil.ProxyRequest) {

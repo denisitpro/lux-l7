@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/denisitpro/lux-l7/internal/egress"
 	"github.com/denisitpro/lux-l7/internal/headers"
 )
 
@@ -39,10 +40,13 @@ func StripRoutingHeaders(h http.Header) {
 
 // WriteUpstreamError answers a failed upstream round trip. A client cancel gets no
 // response (nobody is listening) and is logged at debug; an upstream timeout is a
-// 504; any other dial or transport failure is a 502. attrs are extra log fields.
+// 504; a dial the SSRF guard refused is a 403; any other dial or transport failure is a 502. attrs are extra log fields.
 func WriteUpstreamError(w http.ResponseWriter, log *slog.Logger, err error, attrs ...any) {
 	var netErr net.Error
 	switch {
+	case errors.Is(err, egress.ErrBlockedAddress):
+		log.Warn("upstream address blocked", append([]any{"err", err}, attrs...)...)
+		WriteJSON(w, http.StatusForbidden, "forbidden", "upstream address not allowed")
 	case errors.Is(err, context.Canceled):
 		log.Debug("client canceled", append([]any{"err", err}, attrs...)...)
 	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()):

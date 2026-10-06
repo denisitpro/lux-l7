@@ -29,6 +29,7 @@ const (
 	defaultUpstreamTimeout   = 30 * time.Second
 	defaultUpstreamMaxBytes  = 32 << 20
 	defaultUpstreamScheme    = "https"
+	defaultUpstreamPorts     = "80,443,8443,9443"
 )
 
 // ProxyMode selects header-based or static route-table forwarding.
@@ -67,6 +68,11 @@ type Config struct {
 	// UpstreamAllowHTTP permits plain-http upstreams in header mode (default scheme or
 	// X-L7-Target-Scheme). Off by default so a client cannot downgrade the upstream hop.
 	UpstreamAllowHTTP bool
+	// UpstreamAllowPrivate disables the SSRF guard (header mode): loopback, private,
+	// link-local and other non-public resolved IPs become reachable. Local tests only.
+	UpstreamAllowPrivate bool
+	// UpstreamAllowPorts lists the target ports a header-mode client may reach.
+	UpstreamAllowPorts []int
 
 	AllowHosts    []string
 	AllowSuffixes []string
@@ -103,27 +109,37 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	allowPrivate, err := envBool("UPSTREAM_ALLOW_PRIVATE", false)
+	if err != nil {
+		return Config{}, err
+	}
+	ports, err := parsePorts(envOr("UPSTREAM_ALLOW_PORTS", defaultUpstreamPorts))
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
-		HTTPAddr:          envOr("HTTP_ADDR", defaultHTTPAddr),
-		ProxyMode:         mode,
-		RouteMaxHops:      routeMaxHops,
-		ReadHeaderTimeout: defaultReadHeaderTimeout,
-		ReadTimeout:       defaultReadTimeout,
-		WriteTimeout:      defaultWriteTimeout,
-		IdleTimeout:       defaultIdleTimeout,
-		ShutdownTimeout:   defaultShutdownTimeout,
-		UpstreamTimeout:   defaultUpstreamTimeout,
-		UpstreamMaxBytes:  defaultUpstreamMaxBytes,
-		UpstreamScheme:    strings.ToLower(envOr("UPSTREAM_DEFAULT_SCHEME", defaultUpstreamScheme)),
-		AllowHosts:        splitCSV(envOr("UPSTREAM_ALLOW_HOSTS", "")),
-		AllowSuffixes:     splitCSV(envOr("UPSTREAM_ALLOW_SUFFIXES", "")),
-		DenyHosts:         splitCSV(envOr("UPSTREAM_DENY_HOSTS", "")),
-		UpstreamAllowHTTP: allowHTTP,
-		AuthEnabled:       authEnabled,
-		AuthMode:          AuthMode(envOr("AUTH_MODE", string(AuthModeInstance))),
-		InstanceToken:     strings.TrimSpace(os.Getenv("PROXY_AUTH_TOKEN")),
-		HostTokenJSON:     strings.TrimSpace(os.Getenv("PROXY_AUTH_HOST_MAP")),
+		HTTPAddr:             envOr("HTTP_ADDR", defaultHTTPAddr),
+		ProxyMode:            mode,
+		RouteMaxHops:         routeMaxHops,
+		ReadHeaderTimeout:    defaultReadHeaderTimeout,
+		ReadTimeout:          defaultReadTimeout,
+		WriteTimeout:         defaultWriteTimeout,
+		IdleTimeout:          defaultIdleTimeout,
+		ShutdownTimeout:      defaultShutdownTimeout,
+		UpstreamTimeout:      defaultUpstreamTimeout,
+		UpstreamMaxBytes:     defaultUpstreamMaxBytes,
+		UpstreamScheme:       strings.ToLower(envOr("UPSTREAM_DEFAULT_SCHEME", defaultUpstreamScheme)),
+		AllowHosts:           splitCSV(envOr("UPSTREAM_ALLOW_HOSTS", "")),
+		AllowSuffixes:        splitCSV(envOr("UPSTREAM_ALLOW_SUFFIXES", "")),
+		DenyHosts:            splitCSV(envOr("UPSTREAM_DENY_HOSTS", "")),
+		UpstreamAllowHTTP:    allowHTTP,
+		UpstreamAllowPrivate: allowPrivate,
+		UpstreamAllowPorts:   ports,
+		AuthEnabled:          authEnabled,
+		AuthMode:             AuthMode(envOr("AUTH_MODE", string(AuthModeInstance))),
+		InstanceToken:        strings.TrimSpace(os.Getenv("PROXY_AUTH_TOKEN")),
+		HostTokenJSON:        strings.TrimSpace(os.Getenv("PROXY_AUTH_HOST_MAP")),
 	}
 
 	level, err := parseLevel(envOr("LOG_LEVEL", defaultLogLevel))
@@ -292,6 +308,21 @@ func envBool(key string, fallback bool) (bool, error) {
 		return false, fmt.Errorf("%s: invalid boolean %q (use true or false)", key, raw)
 	}
 	return b, nil
+}
+
+func parsePorts(raw string) ([]int, error) {
+	var out []int
+	for _, p := range splitCSV(raw) {
+		n, err := strconv.ParseUint(p, 10, 16)
+		if err != nil || n == 0 {
+			return nil, fmt.Errorf("UPSTREAM_ALLOW_PORTS: invalid port %q", p)
+		}
+		out = append(out, int(n))
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("UPSTREAM_ALLOW_PORTS: no ports")
+	}
+	return out, nil
 }
 
 func splitCSV(raw string) []string {
