@@ -63,25 +63,14 @@ func TestAuthResolution(t *testing.T) {
 		{"instance token only", map[string]string{"PROXY_AUTH_TOKEN": "x"}, "", true, config.AuthModeInstance},
 		{"host map only", map[string]string{"PROXY_AUTH_HOST_MAP": hostMap}, "", true, config.AuthModePerHost},
 		{"both tokens", map[string]string{"PROXY_AUTH_TOKEN": "x", "PROXY_AUTH_HOST_MAP": hostMap}, "choose one", false, ""},
-		// AUTH_ENABLED=true.
-		{"true no tokens", map[string]string{"AUTH_ENABLED": "true"}, "requires PROXY_AUTH_TOKEN", false, ""},
-		{"true instance", map[string]string{"AUTH_ENABLED": "true", "PROXY_AUTH_TOKEN": "x"}, "", true, config.AuthModeInstance},
-		{"true host map", map[string]string{"AUTH_ENABLED": "true", "PROXY_AUTH_HOST_MAP": hostMap}, "", true, config.AuthModePerHost},
-		// AUTH_ENABLED=false.
-		{"false no tokens", map[string]string{"AUTH_ENABLED": "false"}, "", false, config.AuthModeInstance},
-		{"false instance", map[string]string{"AUTH_ENABLED": "false", "PROXY_AUTH_TOKEN": "x"}, "contradicts", false, ""},
-		{"false host map", map[string]string{"AUTH_ENABLED": "false", "PROXY_AUTH_HOST_MAP": hostMap}, "contradicts", false, ""},
-		// AUTH_MODE consistency.
-		{"mode instance + instance token", map[string]string{"AUTH_MODE": "instance", "PROXY_AUTH_TOKEN": "x"}, "", true, config.AuthModeInstance},
-		{"mode per_host + host map", map[string]string{"AUTH_MODE": "per_host", "PROXY_AUTH_HOST_MAP": hostMap}, "", true, config.AuthModePerHost},
-		{"mode per_host + instance token", map[string]string{"AUTH_MODE": "per_host", "PROXY_AUTH_TOKEN": "x"}, "AUTH_MODE=per_host", false, ""},
-		{"mode instance + host map", map[string]string{"AUTH_MODE": "instance", "PROXY_AUTH_HOST_MAP": hostMap}, "AUTH_MODE=instance", false, ""},
-		{"enabled + per_host + instance token", map[string]string{"AUTH_ENABLED": "true", "AUTH_MODE": "per_host", "PROXY_AUTH_TOKEN": "x"}, "AUTH_MODE=per_host", false, ""},
-		{"bad mode", map[string]string{"AUTH_MODE": "bogus"}, "AUTH_MODE must be", false, ""},
-		// Backward compatibility: existing deployments behave as before.
-		{"compat: only AUTH_ENABLED=false", map[string]string{"AUTH_ENABLED": "false"}, "", false, config.AuthModeInstance},
-		{"compat: enabled+instance mode+token", map[string]string{"AUTH_ENABLED": "true", "AUTH_MODE": "instance", "PROXY_AUTH_TOKEN": "x"}, "", true, config.AuthModeInstance},
-		{"compat: enabled+per_host+map", map[string]string{"AUTH_ENABLED": "true", "AUTH_MODE": "per_host", "PROXY_AUTH_HOST_MAP": hostMap}, "", true, config.AuthModePerHost},
+		// AUTH_ENABLED / AUTH_MODE are removed: never parsed, never change the outcome.
+		{"enabled=true without token stays off", map[string]string{"AUTH_ENABLED": "true"}, "", false, config.AuthModeInstance},
+		{"enabled=false alone", map[string]string{"AUTH_ENABLED": "false"}, "", false, config.AuthModeInstance},
+		{"enabled=garbage", map[string]string{"AUTH_ENABLED": "garbage"}, "", false, config.AuthModeInstance},
+		{"enabled=false does not turn tokens off", map[string]string{"AUTH_ENABLED": "false", "PROXY_AUTH_TOKEN": "x"}, "", true, config.AuthModeInstance},
+		{"mode=bogus", map[string]string{"AUTH_MODE": "bogus"}, "", false, config.AuthModeInstance},
+		{"mode=per_host does not override instance token", map[string]string{"AUTH_MODE": "per_host", "PROXY_AUTH_TOKEN": "x"}, "", true, config.AuthModeInstance},
+		{"mode=instance does not override host map", map[string]string{"AUTH_MODE": "instance", "PROXY_AUTH_HOST_MAP": hostMap}, "", true, config.AuthModePerHost},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,9 +113,9 @@ func TestRouteModeAuth(t *testing.T) {
 	if cfg, err := config.Load(); err != nil || cfg.AuthEnabled {
 		t.Fatalf("route mode without tokens must load: %v", err)
 	}
-	t.Setenv("AUTH_ENABLED", "true")
-	if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "route mode") {
-		t.Fatalf("want route-mode error, got %v", err)
+	t.Setenv("AUTH_ENABLED", "true") // removed variable: ignored, not a route-mode error
+	if cfg, err := config.Load(); err != nil || cfg.AuthEnabled {
+		t.Fatalf("route mode with ignored AUTH_ENABLED must load with auth off: %v", err)
 	}
 }
 
@@ -143,25 +132,51 @@ func TestTunnelFollowsEffectiveAuth(t *testing.T) {
 	}
 }
 
-func TestLegacyAuthVarsWarn(t *testing.T) {
-	clearEnv(t)
-	cfg, err := config.Load()
-	if err != nil || len(cfg.LegacyAuthVars) != 0 {
-		t.Fatalf("legacy = %v err=%v", cfg.LegacyAuthVars, err)
-	}
-	t.Setenv("AUTH_ENABLED", "false")
-	t.Setenv("AUTH_MODE", "instance")
-	cfg, err = config.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, w := range cfg.Warnings() {
-		if strings.Contains(w, "AUTH_ENABLED and AUTH_MODE set: legacy") {
-			found = true
+func TestRemovedAuthVarsWarn(t *testing.T) {
+	warnings := func(t *testing.T, env map[string]string) []string {
+		t.Helper()
+		clearEnv(t)
+		for k, v := range env {
+			t.Setenv(k, v)
 		}
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, w := range cfg.Warnings() {
+			if strings.Contains(w, "is ignored (removed)") {
+				out = append(out, w)
+			}
+		}
+		return out
 	}
-	if !found {
-		t.Fatalf("warnings = %v", cfg.Warnings())
+	if got := warnings(t, nil); len(got) != 0 {
+		t.Fatalf("no removed vars set, got warnings %v", got)
+	}
+	const tail = ", it follows PROXY_AUTH_TOKEN / PROXY_AUTH_HOST_MAP"
+	cases := []struct {
+		name string
+		env  map[string]string
+		want []string
+	}{
+		{"enabled=true no token", map[string]string{"AUTH_ENABLED": "true"},
+			[]string{"AUTH_ENABLED is ignored (removed): auth is off" + tail}},
+		{"enabled=false alone", map[string]string{"AUTH_ENABLED": "false"},
+			[]string{"AUTH_ENABLED is ignored (removed): auth is off" + tail}},
+		{"enabled=garbage", map[string]string{"AUTH_ENABLED": "garbage"},
+			[]string{"AUTH_ENABLED is ignored (removed): auth is off" + tail}},
+		{"mode with instance token", map[string]string{"AUTH_MODE": "instance", "PROXY_AUTH_TOKEN": "x"},
+			[]string{"AUTH_MODE is ignored (removed): auth is on (instance)" + tail}},
+		{"both with host map", map[string]string{"AUTH_ENABLED": "true", "AUTH_MODE": "per_host", "PROXY_AUTH_HOST_MAP": hostMap},
+			[]string{"AUTH_ENABLED is ignored (removed): auth is on (per_host)" + tail, "AUTH_MODE is ignored (removed): auth is on (per_host)" + tail}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := warnings(t, tc.env)
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("warnings = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

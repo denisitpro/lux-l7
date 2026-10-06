@@ -152,6 +152,55 @@ func TestAuthInstance401And403(t *testing.T) {
 	}
 }
 
+// The token is checked before policy and port, so a client without a valid token
+// cannot tell a denied host or port from an allowed one.
+func TestAuthBeforePolicyAndPort(t *testing.T) {
+	up := okUpstream(t, nil)
+	target := up.Listener.Addr().String()
+	port := target[strings.LastIndex(target, ":")+1:]
+
+	newCfg := func() config.Config {
+		cfg := httpCfg()
+		cfg.AllowHosts = []string{"127.0.0.1"}
+		cfg.UpstreamAllowPorts = []int{1} // the upstream port is not allowed
+		cfg.AuthEnabled = true
+		cfg.AuthMode = config.AuthModeInstance
+		cfg.InstanceToken = "s3cret"
+		return cfg
+	}
+	url := newProxy(t, newCfg())
+	for name, hdr := range map[string]map[string]string{
+		"denied host, no token":  {headers.TargetHost: "evil.example.net:443"},
+		"denied host, bad token": {headers.TargetHost: "evil.example.net:443", headers.ProxyToken: "wrong"},
+		"denied port, no token":  {headers.TargetHost: target},
+		"denied port, bad token": {headers.TargetHost: target, headers.ProxyToken: "wrong"},
+	} {
+		if code, _ := do(t, url, hdr); code != http.StatusUnauthorized {
+			t.Fatalf("%s: status=%d, want 401", name, code)
+		}
+	}
+	// A valid token still meets policy and port.
+	if code, _ := do(t, url, map[string]string{headers.TargetHost: "evil.example.net:443", headers.ProxyToken: "s3cret"}); code != http.StatusForbidden {
+		t.Fatalf("valid token, denied host: status=%d, want 403", code)
+	}
+	if code, _ := do(t, url, map[string]string{headers.TargetHost: target, headers.ProxyToken: "s3cret"}); code != http.StatusForbidden {
+		t.Fatalf("valid token, denied port %s: status=%d, want 403", port, code)
+	}
+
+	// per_host keys on the parsed target host: the denied host has no map entry.
+	ph := newCfg()
+	ph.AuthMode = config.AuthModePerHost
+	ph.InstanceToken = ""
+	ph.HostTokenJSON = `{"127.0.0.1":"tok-a"}`
+	purl := newProxy(t, ph)
+	if code, _ := do(t, purl, map[string]string{headers.TargetHost: "evil.example.net:443"}); code != http.StatusUnauthorized {
+		t.Fatalf("per_host denied host, no token: status=%d, want 401", code)
+	}
+	if code, _ := do(t, purl, map[string]string{headers.TargetHost: target, headers.ProxyToken: "tok-a"}); code != http.StatusForbidden {
+		t.Fatalf("per_host valid token, denied port: status=%d, want 403", code)
+	}
+}
+
 func TestAuthPerHost(t *testing.T) {
 	up := okUpstream(t, nil)
 	cfg := httpCfg()

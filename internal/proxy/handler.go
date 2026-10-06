@@ -84,17 +84,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, "bad_target", err.Error())
 		return
 	}
+	// Token first: an unauthenticated client must not learn the allow list or port list
+	// from 403 versus 401.
+	token := r.Header.Get(headers.ProxyToken)
+	if !h.auth.Authorize(token, t.host) {
+		WriteJSON(w, http.StatusUnauthorized, "unauthorized", "missing or invalid proxy token")
+		return
+	}
 	if !h.policy.Allowed(t.host) {
 		WriteJSON(w, http.StatusForbidden, "forbidden", "upstream host not allowed")
 		return
 	}
 	if !h.portAllowed(t) {
 		WriteJSON(w, http.StatusForbidden, "forbidden", "upstream port not allowed")
-		return
-	}
-	token := r.Header.Get(headers.ProxyToken)
-	if !h.auth.Authorize(token, t.host) {
-		WriteJSON(w, http.StatusUnauthorized, "unauthorized", "missing or invalid proxy token")
 		return
 	}
 

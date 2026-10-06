@@ -335,6 +335,30 @@ func TestAuthRequired(t *testing.T) {
 	expectStatus(t, addr, target, basic("", testToken), http.StatusOK)
 }
 
+// Credentials are checked before policy and port: a client without a valid token
+// cannot tell a denied host or port from an allowed one.
+func TestAuthBeforePolicyAndPort(t *testing.T) {
+	_, port := tcpServer(t, echo)
+	p := strconv.Itoa(port)
+	cfg := withAuth(baseCfg(port + 1)) // the echo port is not allowed
+	cfg.DenyHosts = []string{"denied.example.com"}
+	addr, _ := start(t, cfg)
+
+	for name, target := range map[string]string{
+		"denied host":       "denied.example.com:" + p,
+		"host off the list": "other.example.net:" + strconv.Itoa(port+1),
+		"denied port":       "127.0.0.1:" + p,
+	} {
+		t.Run(name, func(t *testing.T) {
+			expectStatus(t, addr, target, nil, http.StatusProxyAuthRequired)
+			expectStatus(t, addr, target, basic("u", "nope"), http.StatusProxyAuthRequired)
+		})
+	}
+	// A valid token still meets policy and port.
+	expectStatus(t, addr, "denied.example.com:"+p, basic("u", testToken), http.StatusForbidden)
+	expectStatus(t, addr, "127.0.0.1:"+p, basic("u", testToken), http.StatusForbidden)
+}
+
 func TestAuthMultipleInstanceTokens(t *testing.T) {
 	_, port := tcpServer(t, echo)
 	target := "127.0.0.1:" + strconv.Itoa(port)

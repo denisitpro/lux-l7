@@ -163,17 +163,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authority := net.JoinHostPort(host, port)
+	// Credentials first: an unauthenticated client must not learn the allow list or
+	// port list from 403 versus 407.
+	if !s.auth.Authorize(proxyToken(r.Header), authority) {
+		w.Header().Set("Proxy-Authenticate", proxyRealm)
+		proxy.WriteJSON(w, http.StatusProxyAuthRequired, "proxy_auth_required", "missing or invalid proxy credentials")
+		return
+	}
 	if !s.policy.Allowed(authority) {
 		proxy.WriteJSON(w, http.StatusForbidden, "forbidden", "upstream host not allowed")
 		return
 	}
 	if n, _ := strconv.Atoi(port); !s.portAllowed(n) { // SplitAuthority validated the port
 		proxy.WriteJSON(w, http.StatusForbidden, "forbidden", "upstream port not allowed")
-		return
-	}
-	if !s.auth.Authorize(proxyToken(r.Header), authority) {
-		w.Header().Set("Proxy-Authenticate", proxyRealm)
-		proxy.WriteJSON(w, http.StatusProxyAuthRequired, "proxy_auth_required", "missing or invalid proxy credentials")
 		return
 	}
 	if s.isClosing() {
