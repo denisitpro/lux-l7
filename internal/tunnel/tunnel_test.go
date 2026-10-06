@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -333,6 +334,29 @@ func TestAuthRequired(t *testing.T) {
 	// Any username works; only the token counts. Colons inside the token survive.
 	expectStatus(t, addr, target, basic("whoever", testToken), http.StatusOK)
 	expectStatus(t, addr, target, basic("", testToken), http.StatusOK)
+}
+
+// A refused CONNECT closes the connection instead of waiting for a next request, and
+// the server's idle timeout bounds any keep-alive wait.
+func TestRefusedConnectClosesConnection(t *testing.T) {
+	_, port := tcpServer(t, echo)
+	target := "127.0.0.1:" + strconv.Itoa(port)
+	cfg := withAuth(baseCfg(port))
+	cfg.IdleTimeout = 300 * time.Millisecond
+	addr, _ := start(t, cfg)
+
+	c := dial(t, addr, nil)
+	res, br := connect(t, c, target, nil)
+	if res.StatusCode != http.StatusProxyAuthRequired {
+		t.Fatalf("status = %d, want 407", res.StatusCode)
+	}
+	if !res.Close {
+		t.Fatal("refusal does not announce Connection: close")
+	}
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := br.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatalf("read after 407 = %v, want EOF (server closed the connection)", err)
+	}
 }
 
 // Credentials are checked before policy and port: a client without a valid token

@@ -111,6 +111,8 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 		// No Read/Write timeouts: they would cut an established tunnel. Idle time is
 		// enforced per tunnel by the relay.
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		// Backstop for keep-alive connections waiting for a next request.
+		IdleTimeout: cfg.IdleTimeout,
 		// Empty, non-nil: never negotiate h2 on the TLS listener.
 		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
 		// The default error log prints the client address on handshake failures.
@@ -169,6 +171,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The client names only the target, so there is no ingress host: the label stays "other".
 	w, obs := s.observer.Begin(metrics.ModeTunnel, w, r)
 	defer obs.Done()
+	// Every response written through w is a refusal or an error (a tunnel is hijacked
+	// and answered raw), so never keep the connection for another request.
+	w.Header().Set("Connection", "close")
 	if r.Method != http.MethodConnect {
 		obs.Reject(metrics.RejectMethodNotAllowed)
 		w.Header().Set("Allow", http.MethodConnect)

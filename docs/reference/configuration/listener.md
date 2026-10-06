@@ -46,7 +46,7 @@ The main listener speaks plain HTTP/1.x. There is no TLS option on it: end TLS a
 
 ### `HTTP_IDLE_TIMEOUT`
 
-- **What:** how long an idle keep-alive client connection stays open between requests, on the main listener.
+- **What:** how long an idle keep-alive client connection stays open between requests, on the main listener. It also applies to the tunnel listener, as a backstop for connections waiting for a next request (a refused `CONNECT` closes its connection anyway).
 - **Values:** Go duration greater than zero.
 - **Default:** `120s`.
 - **Change it when:** a load balancer in front closes idle connections sooner or later than 120 seconds and you want the proxy to match it.
