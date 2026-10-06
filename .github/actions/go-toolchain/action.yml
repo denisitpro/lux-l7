@@ -1,0 +1,41 @@
+name: Resolve and install the Go toolchain
+description: >
+  Reads the Go version from version.txt, fails if it is empty or differs from
+  the go.mod `go` line, then installs exactly that toolchain without any
+  GitHub Actions cache. One copy for every job, so ci.yml and docker-release.yml
+  cannot drift apart.
+
+# version.txt is the single source for the Go version (Makefile, Dockerfile
+# and CI all read it). The go.mod comparison stops a half-done bump — one file
+# updated, the other forgotten — from reaching a build.
+outputs:
+  go_version:
+    description: Go version read from version.txt
+    value: ${{ steps.goversion.outputs.go_version }}
+
+runs:
+  using: composite
+  steps:
+    - id: goversion
+      shell: bash
+      run: |
+        set -euo pipefail
+        GO_VERSION="$(tr -d '[:space:]' < version.txt)"
+        MOD="$(sed -n 's/^go //p' go.mod | head -1 | tr -d '[:space:]')"
+        if [ -z "$GO_VERSION" ]; then
+          echo "::error::empty version.txt" >&2
+          exit 1
+        fi
+        if [ "$GO_VERSION" != "$MOD" ]; then
+          echo "::error::go.mod ($MOD) != version.txt ($GO_VERSION)" >&2
+          exit 1
+        fi
+        echo "go_version=$GO_VERSION" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-go@v7
+      with:
+        go-version: ${{ steps.goversion.outputs.go_version }}
+        # Caches removed on purpose (reference decision): builds run on free GitHub runners, releases
+        # are rare so the hit rate is ~0 (GHA evicts entries unused for 7 days), and a
+        # stale or poisoned cache is a risk for a release image. Do not re-add.
+        cache: false
