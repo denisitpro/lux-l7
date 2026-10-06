@@ -6,8 +6,6 @@ import (
 	"net"
 	"net/http"
 	"time"
-
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Mode is the proxy mode label.
@@ -58,79 +56,114 @@ type EntryMatcher interface {
 	AllowEntry(authority string) string
 }
 
-// Options configures New.
-type Options struct {
-	// Location becomes a constant label on every lux_l7_ series; empty adds none.
-	Location string
-	// IngressHosts are the front hosts header mode may label; every other host is "other".
-	IngressHosts []string
+// Request is the outcome of one request, handed to every Sink. It carries raw
+// facts (the client-supplied Host, the target authority, the route); what a sink
+// may export from them, and as which label, is the sink's decision.
+type Request struct {
+	Mode   Mode
+	Method string
+	// Duration is zero when a tunnel opens and the request lifetime when it finishes.
+	Duration time.Duration
+	// Status is the final status; 0 means no response was written.
+	Status int
+	// Bytes counts response body bytes, or for a tunnel the bytes relayed both ways.
+	Bytes int64
+	// IngressHost is the client-supplied Host header (header mode).
+	IngressHost string
+	// Authority is the client-named target, host or host:port (header mode and tunnel).
+	Authority string
+	// Route is the matched route index, -1 when none matched or not in route mode.
+	Route        int
+	RouteHost    string // the matched route's host pattern as configured
+	UpstreamHost string // the matched route's upstream host
+	// Rejection is set when the request was refused before an upstream.
+	Rejection Rejection
+	// UpstreamError is set when the upstream round trip or dial failed.
+	UpstreamError UpstreamError
+	// Tunnel marks an established CONNECT tunnel.
+	Tunnel bool
+
+	matcher EntryMatcher
 }
 
-// Metrics records proxy request series.
-type Metrics struct {
-	hosts          Hosts
-	requests       *prometheus.CounterVec
-	duration       *prometheus.HistogramVec
-	rejections     *prometheus.CounterVec
-	upstreamErrors *prometheus.CounterVec
-	tunnelsActive  prometheus.Gauge
+// AllowEntry names the allow-list entry that admitted Authority, empty when none did.
+func (r Request) AllowEntry() string {
+	if r.matcher == nil {
+		return ""
+	}
+	return r.matcher.AllowEntry(r.Authority)
 }
 
-// New registers the series on reg.
-func New(reg prometheus.Registerer, opts Options) *Metrics {
-	if opts.Location != "" {
-		reg = prometheus.WrapRegistererWith(prometheus.Labels{"location": opts.Location}, reg)
+// Class is the coarse status class; no recorded status means no response was written.
+func (r Request) Class() string {
+	switch {
+	case r.Status == 0:
+		return statusError
+	case r.Status < 300:
+		return "2xx"
+	case r.Status < 400:
+		return "3xx"
+	case r.Status < 500:
+		return "4xx"
+	default:
+		return "5xx"
 	}
-	m := &Metrics{
-		hosts: NewHosts(opts.IngressHosts),
-		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: namespace, Name: "requests_total",
-			Help: "Proxied requests by mode, ingress host, upstream host and status class (2xx|3xx|4xx|5xx|error); rejections included.",
-		}, []string{"mode", "ingress_host", "upstream_host", "status_class"}),
-		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Namespace: namespace, Name: "request_duration_seconds",
-			Help:    "Request latency by mode and status class; for a tunnel, its lifetime.",
-			Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
-		}, []string{"mode", "status_class"}),
-		rejections: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: namespace, Name: "rejections_total",
-			Help: "Requests refused before reaching an upstream, by mode and reason.",
-		}, []string{"mode", "reason"}),
-		upstreamErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: namespace, Name: "upstream_errors_total",
-			Help: "Failed upstream round trips and dials by mode and reason (timeout|blocked|canceled|other).",
-		}, []string{"mode", "reason"}),
-		tunnelsActive: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: namespace, Name: "tunnels_active",
-			Help: "Open CONNECT tunnels.",
-		}),
+}
+
+// Sink consumes request outcomes: the Prometheus export (Metrics), the request log
+// (reqlog.Logger). Calls come from request goroutines, so a sink must be safe for
+// concurrent use and must not block.
+type Sink interface {
+	// Opened reports an established tunnel, which can outlive any scrape window.
+	Opened(Request)
+	// Finished reports the end of every request, a tunnel's close included.
+	Finished(Request)
+}
+
+// Observer starts observations and fans their outcome out to its sinks. A nil
+// *Observer, like a nil *Observation, records nothing.
+type Observer struct {
+	sinks []Sink
+}
+
+// NewObserver returns an Observer over sinks; with none it returns nil.
+func NewObserver(sinks ...Sink) *Observer {
+	if len(sinks) == 0 {
+		return nil
 	}
-	reg.MustRegister(m.requests, m.duration, m.rejections, m.upstreamErrors, m.tunnelsActive)
-	return m
+	return &Observer{sinks: sinks}
 }
 
 // Begin starts observing one request and returns the writer the handler must use
-// from then on. A nil *Metrics returns w itself and a nil *Observation.
-func (m *Metrics) Begin(mode Mode, w http.ResponseWriter) (http.ResponseWriter, *Observation) {
-	if m == nil {
+// from then on. A nil *Observer returns w itself and a nil *Observation.
+func (ob *Observer) Begin(mode Mode, w http.ResponseWriter, r *http.Request) (http.ResponseWriter, *Observation) {
+	if ob == nil {
 		return w, nil
 	}
-	o := &Observation{ResponseWriter: w, m: m, mode: mode, start: time.Now(), ingress: Other, upstream: Other}
+	o := &Observation{ResponseWriter: w, ob: ob, mode: mode, method: r.Method, start: time.Now(), route: -1}
 	return o, o
 }
 
 // Observation is one request in flight. It is also the http.ResponseWriter that
-// captures the status. All methods are safe on a nil receiver.
+// captures the status and size. All methods are safe on a nil receiver.
 type Observation struct {
 	http.ResponseWriter
-	m        *Metrics
-	mode     Mode
-	start    time.Time
-	status   int
-	ingress  string
-	upstream string
-	counted  bool
-	tunnel   bool
+	ob     *Observer
+	mode   Mode
+	method string
+	start  time.Time
+	status int
+	bytes  int64
+
+	ingressHost  string
+	authority    string
+	matcher      EntryMatcher
+	route        int
+	routeHost    string
+	upstreamHost string
+	rejection    Rejection
+	upstreamErr  UpstreamError
+	tunnel       bool
 }
 
 // From returns the Observation behind w, or nil. The reverse proxy hands its
@@ -148,12 +181,14 @@ func (o *Observation) WriteHeader(code int) {
 	o.ResponseWriter.WriteHeader(code)
 }
 
-// Write records the implicit 200.
+// Write records the implicit 200 and the body size.
 func (o *Observation) Write(b []byte) (int, error) {
 	if o.status == 0 {
 		o.status = http.StatusOK
 	}
-	return o.ResponseWriter.Write(b)
+	n, err := o.ResponseWriter.Write(b)
+	o.bytes += int64(n)
+	return n, err
 }
 
 // Flush forwards to the underlying writer when it can flush.
@@ -180,40 +215,39 @@ func (o *Observation) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // Unwrap lets http.ResponseController reach the underlying writer.
 func (o *Observation) Unwrap() http.ResponseWriter { return o.ResponseWriter }
 
-// Ingress labels the request by a client-supplied Host (header mode).
+// Ingress records the client-supplied Host (header mode).
 func (o *Observation) Ingress(requestHost string) {
 	if o != nil {
-		o.ingress = o.m.hosts.Ingress(requestHost)
+		o.ingressHost = requestHost
 	}
 }
 
-// Route labels the request by the matched route (route mode).
-func (o *Observation) Route(hostPattern, upstreamHost string) {
+// Route records the matched route (route mode): its index, host pattern and upstream host.
+func (o *Observation) Route(idx int, hostPattern, upstreamHost string) {
 	if o != nil {
-		o.ingress = o.m.hosts.RouteIngress(hostPattern)
-		o.upstream = o.m.hosts.RouteUpstream(upstreamHost)
+		o.route, o.routeHost, o.upstreamHost = idx, hostPattern, upstreamHost
 	}
 }
 
-// Upstream labels the request by the allow-list entry that admits authority
-// (header mode and tunnel). The matcher is not called when metrics are off.
+// Upstream records the client-named target and the matcher that maps it to an
+// allow-list entry (header mode and tunnel). The matcher runs only if a sink asks.
 func (o *Observation) Upstream(p EntryMatcher, authority string) {
 	if o != nil {
-		o.upstream = o.m.hosts.Upstream(p.AllowEntry(authority))
+		o.matcher, o.authority = p, authority
 	}
 }
 
 // Reject records a refused request.
 func (o *Observation) Reject(r Rejection) {
 	if o != nil {
-		o.m.rejections.WithLabelValues(string(o.mode), string(r)).Inc()
+		o.rejection = r
 	}
 }
 
 // UpstreamError records a failed upstream round trip or dial.
 func (o *Observation) UpstreamError(e UpstreamError) {
 	if o != nil {
-		o.m.upstreamErrors.WithLabelValues(string(o.mode), string(e)).Inc()
+		o.upstreamErr = e
 	}
 }
 
@@ -224,50 +258,44 @@ func (o *Observation) SetStatus(code int) {
 	}
 }
 
-// TunnelOpen marks an established tunnel: it counts the request now (a tunnel can
-// outlive any scrape window) and raises tunnels_active until Done.
+// AddBytes records bytes moved outside the ResponseWriter (a tunnel's relay).
+func (o *Observation) AddBytes(n int64) {
+	if o != nil {
+		o.bytes += n
+	}
+}
+
+// TunnelOpen marks an established tunnel: sinks hear Opened now (a tunnel can
+// outlive any scrape window) and Finished when Done runs.
 func (o *Observation) TunnelOpen() {
 	if o == nil {
 		return
 	}
 	o.status = http.StatusOK
 	o.tunnel = true
-	o.m.tunnelsActive.Inc()
-	o.count()
+	req := o.request()
+	for _, s := range o.ob.sinks {
+		s.Opened(req)
+	}
 }
 
-// Done finishes the request: counts it (unless TunnelOpen did) and records its duration.
+// Done finishes the request and hands it to every sink.
 func (o *Observation) Done() {
 	if o == nil {
 		return
 	}
-	if o.tunnel {
-		o.m.tunnelsActive.Dec()
+	req := o.request()
+	req.Duration = time.Since(o.start)
+	for _, s := range o.ob.sinks {
+		s.Finished(req)
 	}
-	o.count()
-	o.m.duration.WithLabelValues(string(o.mode), o.class()).Observe(time.Since(o.start).Seconds())
 }
 
-func (o *Observation) count() {
-	if o.counted {
-		return
-	}
-	o.counted = true
-	o.m.requests.WithLabelValues(string(o.mode), o.ingress, o.upstream, o.class()).Inc()
-}
-
-// class is the coarse status class; no recorded status means no response was written.
-func (o *Observation) class() string {
-	switch {
-	case o.status == 0:
-		return statusError
-	case o.status < 300:
-		return "2xx"
-	case o.status < 400:
-		return "3xx"
-	case o.status < 500:
-		return "4xx"
-	default:
-		return "5xx"
+func (o *Observation) request() Request {
+	return Request{
+		Mode: o.mode, Method: o.method, Status: o.status, Bytes: o.bytes,
+		IngressHost: o.ingressHost, Authority: o.authority, matcher: o.matcher,
+		Route: o.route, RouteHost: o.routeHost, UpstreamHost: o.upstreamHost,
+		Rejection: o.rejection, UpstreamError: o.upstreamErr, Tunnel: o.tunnel,
 	}
 }

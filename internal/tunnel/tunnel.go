@@ -43,7 +43,7 @@ type Server struct {
 	idle   time.Duration
 	log    *slog.Logger
 
-	metrics *metrics.Metrics // nil: records nothing
+	observer *metrics.Observer // nil: records nothing
 
 	srv    *http.Server
 	tlsCfg *tls.Config // nil: plain listener
@@ -57,9 +57,9 @@ type Server struct {
 // Option customizes New.
 type Option func(*Server)
 
-// WithMetrics makes the server record request series on m.
-func WithMetrics(m *metrics.Metrics) Option {
-	return func(s *Server) { s.metrics = m }
+// WithObserver makes the server report every tunnel to o (metrics, request log).
+func WithObserver(o *metrics.Observer) Option {
+	return func(s *Server) { s.observer = o }
 }
 
 // New builds the tunnel server. It loads the TLS pair when configured, so a bad
@@ -167,7 +167,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The client names only the target, so there is no ingress host: the label stays "other".
-	w, obs := s.metrics.Begin(metrics.ModeTunnel, w)
+	w, obs := s.observer.Begin(metrics.ModeTunnel, w, r)
 	defer obs.Done()
 	if r.Method != http.MethodConnect {
 		obs.Reject(metrics.RejectMethodNotAllowed)
@@ -210,7 +210,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	up, err := s.dialer.DialContext(r.Context(), "tcp", authority)
 	if err != nil {
 		proxy.ObserveUpstreamError(obs, err)
-		proxy.WriteUpstreamError(w, s.log, err)
+		proxy.WriteUpstreamError(w, err)
 		return
 	}
 	client, bufrw, err := http.NewResponseController(w).Hijack()
@@ -242,12 +242,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = client.Close() }()
 	defer func() { _ = up.Close() }()
 
-	s.log.Debug("tunnel open", "host", host)
 	_ = client.SetDeadline(time.Time{}) // drop ReadHeaderTimeout; relay sets its own
 	if _, err := client.Write([]byte(established)); err != nil {
 		return
 	}
-	s.relay(client, up, pending)
+	obs.AddBytes(s.relay(client, up, pending))
 }
 
 func (s *Server) portAllowed(port int) bool {
@@ -280,19 +279,23 @@ func (s *Server) untrack(a, b net.Conn) {
 	s.wg.Done()
 }
 
-// relay copies both directions until each side is done. The idle deadline on both
-// conns moves forward on traffic in either direction, so a long download with a
-// silent client stays open.
-func (s *Server) relay(client, up net.Conn, pending []byte) {
+// relay copies both directions until each side is done and returns the bytes copied
+// (the client's pipelined bytes included). The idle deadline on both conns moves
+// forward on traffic in either direction, so a long download with a silent client
+// stays open.
+func (s *Server) relay(client, up net.Conn, pending []byte) int64 {
 	extend := func() {
 		d := time.Now().Add(s.idle)
 		_ = client.SetDeadline(d)
 		_ = up.SetDeadline(d)
 	}
 	extend()
+	var total int64
 	if len(pending) > 0 {
-		if _, err := up.Write(pending); err != nil {
-			return
+		n, err := up.Write(pending)
+		total += int64(n)
+		if err != nil {
+			return total
 		}
 	}
 
@@ -301,40 +304,45 @@ func (s *Server) relay(client, up net.Conn, pending []byte) {
 		_ = up.Close()
 	}
 	var wg sync.WaitGroup
+	var toUp, toClient int64 // each written by its own goroutine, read after wg.Wait
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		pipe(up, client, extend, closeBoth)
+		toUp = pipe(up, client, extend, closeBoth)
 	}()
 	go func() {
 		defer wg.Done()
-		pipe(client, up, extend, closeBoth)
+		toClient = pipe(client, up, extend, closeBoth)
 	}()
 	wg.Wait()
+	return total + toUp + toClient
 }
 
-// pipe copies src to dst. On EOF it half-closes dst (when supported) so the peer can
-// still answer; any other end, or a conn that cannot half-close, tears both down.
-func pipe(dst, src net.Conn, extend, closeBoth func()) {
+// pipe copies src to dst and returns the bytes written. On EOF it half-closes dst
+// (when supported) so the peer can still answer; any other end, or a conn that cannot
+// half-close, tears both down.
+func pipe(dst, src net.Conn, extend, closeBoth func()) (written int64) {
 	buf := make([]byte, copyBufBytes)
 	for {
 		n, err := src.Read(buf)
 		if n > 0 {
 			extend()
-			if _, werr := dst.Write(buf[:n]); werr != nil {
+			w, werr := dst.Write(buf[:n])
+			written += int64(w)
+			if werr != nil {
 				closeBoth()
-				return
+				return written
 			}
 			extend()
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				if cw, ok := dst.(interface{ CloseWrite() error }); ok && cw.CloseWrite() == nil {
-					return
+					return written
 				}
 			}
 			closeBoth()
-			return
+			return written
 		}
 	}
 }

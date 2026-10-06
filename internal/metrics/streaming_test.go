@@ -34,7 +34,7 @@ func frontend(t *testing.T, mode metrics.Mode, upstream *httptest.Server) (addr,
 	case metrics.ModeHeader:
 		cfg := config.Config{UpstreamScheme: "http", UpstreamAllowHTTP: true, UpstreamAllowPrivate: true, UpstreamTimeout: 5 * time.Second}
 		v, _ := auth.New(cfg)
-		h = proxy.New(cfg, v, discard, proxy.WithMetrics(m))
+		h = proxy.New(cfg, v, discard, proxy.WithObserver(metrics.NewObserver(m)))
 		host, hdr = "client.example", map[string]string{headers.TargetHost: upstream.Listener.Addr().String()}
 	default:
 		routes, err := route.ParseJSON(`[{"host":"example.com","path_prefix":"/","upstream":"http://` + upstream.Listener.Addr().String() + `"}]`)
@@ -42,7 +42,7 @@ func frontend(t *testing.T, mode metrics.Mode, upstream *httptest.Server) (addr,
 			t.Fatal(err)
 		}
 		cfg := config.Config{UpstreamMaxBytes: 1 << 20, RouteMaxHops: 1, UpstreamTimeout: 5 * time.Second}
-		h = relay.New(cfg, routes, discard, relay.Options{Metrics: m})
+		h = relay.New(cfg, routes, discard, relay.Options{Observer: metrics.NewObserver(m)})
 		host = "example.com"
 	}
 	srv := httptest.NewServer(h)

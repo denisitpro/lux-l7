@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net"
 	"net/http"
 
@@ -39,28 +38,26 @@ func StripRoutingHeaders(h http.Header) {
 }
 
 // WriteUpstreamError answers a failed upstream round trip. A client cancel gets no
-// response (nobody is listening) and is logged at debug; an upstream timeout is a
-// 504; a dial the SSRF guard refused is a 403; a request body cut by the size limit is a
-// 413; any other dial or transport failure is a 502. attrs are extra log fields.
-func WriteUpstreamError(w http.ResponseWriter, log *slog.Logger, err error, attrs ...any) {
+// response (nobody is listening); an upstream timeout is a 504; a dial the SSRF guard
+// refused is a 403; a request body cut by the size limit is a 413; any other dial or
+// transport failure is a 502. It logs nothing: the error text can name the dial
+// address, so only the request log (internal/reqlog) reports the reason, from the
+// observation (ObserveUpstreamError).
+func WriteUpstreamError(w http.ResponseWriter, err error) {
 	var netErr net.Error
 	var tooLarge *http.MaxBytesError
 	switch {
 	case errors.As(err, &tooLarge):
 		// A chunked body has no Content-Length for LimitBody to pre-check; the cut
 		// surfaces here as a transport error.
-		log.Warn("request body too large", append([]any{"limit", tooLarge.Limit}, attrs...)...)
 		WriteJSON(w, http.StatusRequestEntityTooLarge, "body_too_large", "request body too large")
 	case errors.Is(err, egress.ErrBlockedAddress):
-		log.Warn("upstream address blocked", append([]any{"err", err}, attrs...)...)
 		WriteJSON(w, http.StatusForbidden, "forbidden", "upstream address not allowed")
 	case errors.Is(err, context.Canceled):
-		log.Debug("client canceled", append([]any{"err", err}, attrs...)...)
+		// Nobody is listening.
 	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()):
-		log.Warn("upstream timeout", append([]any{"err", err}, attrs...)...)
 		WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
 	default:
-		log.Error("upstream", append([]any{"err", err}, attrs...)...)
 		WriteJSON(w, http.StatusBadGateway, "bad_gateway", "upstream request failed")
 	}
 }

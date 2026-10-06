@@ -23,18 +23,18 @@ const statusLoopDetected = 508
 // Options configures relay construction (tests may inject RootCAs).
 type Options struct {
 	RootCAs *x509.CertPool
-	// Metrics records request series; nil records nothing.
-	Metrics *metrics.Metrics
+	// Observer receives every request outcome (metrics, request log); nil records nothing.
+	Observer *metrics.Observer
 }
 
 // Handler forwards requests using a static route table.
 type Handler struct {
-	cfg     config.Config
-	routes  []route.Route
-	proxies []*httputil.ReverseProxy
-	maxHops int
-	log     *slog.Logger
-	metrics *metrics.Metrics
+	cfg      config.Config
+	routes   []route.Route
+	proxies  []*httputil.ReverseProxy
+	maxHops  int
+	log      *slog.Logger
+	observer *metrics.Observer
 }
 
 // New builds the route-mode handler.
@@ -43,11 +43,11 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 		log = slog.Default()
 	}
 	h := &Handler{
-		cfg:     cfg,
-		routes:  routes,
-		maxHops: cfg.RouteMaxHops,
-		log:     log,
-		metrics: opts.Metrics,
+		cfg:      cfg,
+		routes:   routes,
+		maxHops:  cfg.RouteMaxHops,
+		log:      log,
+		observer: opts.Observer,
 	}
 	h.proxies = make([]*httputil.ReverseProxy, len(routes))
 	for i, rt := range routes {
@@ -59,10 +59,9 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 				h.rewrite(pr, idx)
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-				// Minimal logging (#24): no client or request data. Transport errors name
-				// the dial address and the failure, never the request path or query.
+				// Logging is the request log's job (internal/reqlog), from the observation.
 				proxy.ObserveUpstreamError(metrics.From(w), err)
-				proxy.WriteUpstreamError(w, h.log, err, "route", idx, "upstream", rt.Upstream.String())
+				proxy.WriteUpstreamError(w, err)
 			},
 		}
 	}
@@ -70,7 +69,7 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 }
 
 func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	w, obs := h.metrics.Begin(metrics.ModeRoute, rw)
+	w, obs := h.observer.Begin(metrics.ModeRoute, rw, r)
 	defer obs.Done()
 	if r.Method == http.MethodConnect {
 		// CONNECT tunnels are a separate mode (#23); never relay them as plain requests.
@@ -85,7 +84,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	obs.Route(h.routes[idx].Host, h.routes[idx].Upstream.Hostname())
+	obs.Route(idx, h.routes[idx].Host, h.routes[idx].Upstream.Hostname())
 
 	inHops, err := parseHops(r.Header.Get(headers.Hops))
 	if err != nil {
