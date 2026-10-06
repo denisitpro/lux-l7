@@ -65,8 +65,9 @@ Proxy-Authorization: Basic base64(user:token)
 | 3 | Host policy | `403 forbidden` | `upstream host not allowed` |
 | 4 | `TUNNEL_ALLOW_PORTS` | `403 forbidden` | `upstream port not allowed` |
 | 5 | Proxy is shutting down | `503 shutting_down` | `proxy is shutting down` |
-| 6 | Dial: blocked IP / timeout / other | `403 forbidden` / `504 upstream_timeout` / `502 bad_gateway` | as in header mode |
-| 7 | Connection cannot be hijacked | `500 internal` | `connection cannot be tunneled` |
+| 6 | `TUNNEL_MAX_CONNECTIONS` tunnels already open (checked after 2 to 4 and before the dial) | `503 tunnel_capacity` (headers `Retry-After: 1`, `Connection: close`) | `tunnel capacity reached, retry shortly` |
+| 7 | Dial: blocked IP / timeout / other | `403 forbidden` / `504 upstream_timeout` / `502 bad_gateway` | as in header mode |
+| 8 | Connection cannot be hijacked | `500 internal` | `connection cannot be tunneled` |
 
 `200 Connection Established` is sent only after the upstream dial succeeded. Bytes the client sent right behind the `CONNECT` (the TLS ClientHello) are forwarded first.
 

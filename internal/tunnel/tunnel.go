@@ -41,7 +41,9 @@ type Server struct {
 	dialer *net.Dialer
 	ports  map[int]struct{}
 	idle   time.Duration
-	log    *slog.Logger
+	// slots is a semaphore of free tunnel slots; nil means unlimited.
+	slots chan struct{}
+	log   *slog.Logger
 
 	observer *metrics.Observer // nil: records nothing
 
@@ -76,6 +78,12 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 		idle:   cfg.TunnelIdleTimeout,
 		log:    log,
 		conns:  make(map[net.Conn]struct{}),
+	}
+	if cfg.TunnelMaxConnections < 0 {
+		return nil, errors.New("tunnel max connections must be >= 0")
+	}
+	if cfg.TunnelMaxConnections > 0 {
+		s.slots = make(chan struct{}, cfg.TunnelMaxConnections)
 	}
 	for _, o := range opts {
 		o(s)
@@ -211,6 +219,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		proxy.WriteJSON(w, http.StatusServiceUnavailable, "shutting_down", "proxy is shutting down")
 		return
 	}
+	// The slot is taken before dialing and given back when the handler returns, so
+	// dial failures, hijack errors and a finished tunnel all release it exactly once.
+	if !s.acquire() {
+		obs.Reject(metrics.RejectTunnelCapacity)
+		w.Header().Set("Retry-After", "1")
+		proxy.WriteJSON(w, http.StatusServiceUnavailable, "tunnel_capacity", "tunnel capacity reached, retry shortly")
+		return
+	}
+	defer s.release()
 
 	up, err := s.dialer.DialContext(r.Context(), "tcp", authority)
 	if err != nil {
@@ -257,6 +274,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) portAllowed(port int) bool {
 	_, ok := s.ports[port]
 	return ok
+}
+
+// acquire takes a tunnel slot without blocking; false means the cap is reached.
+func (s *Server) acquire() bool {
+	if s.slots == nil {
+		return true
+	}
+	select {
+	case s.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) release() {
+	if s.slots != nil {
+		<-s.slots
+	}
 }
 
 func (s *Server) isClosing() bool {

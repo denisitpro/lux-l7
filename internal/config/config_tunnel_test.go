@@ -22,6 +22,42 @@ func TestTunnelDefaults(t *testing.T) {
 	if cfg.TunnelIdleTimeout != 10*time.Minute {
 		t.Fatalf("idle = %s", cfg.TunnelIdleTimeout)
 	}
+	if cfg.TunnelMaxConnections != 300 {
+		t.Fatalf("max connections = %d, want 300", cfg.TunnelMaxConnections)
+	}
+}
+
+func TestTunnelMaxConnections(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want int
+		fail bool
+	}{
+		{"", 300, false},
+		{"0", 0, false},
+		{" 25 ", 25, false},
+		{"-1", 0, true},
+		{"many", 0, true},
+		{"1.5", 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			t.Setenv("TUNNEL_MAX_CONNECTIONS", tc.raw)
+			cfg, err := config.Load()
+			if tc.fail {
+				if err == nil || !strings.Contains(err.Error(), "TUNNEL_MAX_CONNECTIONS") {
+					t.Fatalf("want error naming TUNNEL_MAX_CONNECTIONS, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.TunnelMaxConnections != tc.want {
+				t.Fatalf("max connections = %d, want %d", cfg.TunnelMaxConnections, tc.want)
+			}
+		})
+	}
 }
 
 func TestTunnelConfigValidation(t *testing.T) {

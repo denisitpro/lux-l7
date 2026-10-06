@@ -42,6 +42,15 @@ Startup rules for a tunnel (any failure exits at startup):
 - **Example:** `TUNNEL_IDLE_TIMEOUT=30m`
 - **If wrong:** zero, negative or unparsable fails startup.
 
+### `TUNNEL_MAX_CONNECTIONS`
+
+- **What:** the maximum number of tunnels open at once. A new `CONNECT` over the cap is refused before the upstream is dialed with `503 tunnel_capacity` (`Retry-After: 1`, `Connection: close`) and counted as the `tunnel_capacity` rejection in `lux_l7_rejections_total`. The check runs after credentials, host policy and port, so an unauthenticated client cannot fill the cap or learn it is reached.
+- **Values:** integer, `0` or greater. `0` means unlimited.
+- **Default:** `300`, chosen below typical OS and Kubernetes file-descriptor limits (each tunnel holds two sockets, plus about 64 KiB of buffers).
+- **Change it when:** the process file-descriptor limit is higher or lower than the default allows, or a leaked token must not be able to exhaust memory. Raise it for many long-lived clients; `0` removes the protection.
+- **Example:** `TUNNEL_MAX_CONNECTIONS=1000`
+- **If wrong:** a negative or non-integer value fails startup (checked in every mode, like `TUNNEL_ALLOW_PORTS`); it has no effect without `TUNNEL_ADDR`. Too low shows as `503 tunnel_capacity` for legitimate clients (watch `lux_l7_tunnels_active` against the cap); too high or `0` risks running out of file descriptors before the cap acts.
+
 ### `TUNNEL_TLS_CERT_FILE`, `TUNNEL_TLS_KEY_FILE`
 
 - **What:** a PEM certificate and key that turn the tunnel listener into a TLS listener (TLS 1.2 or higher). The client then sends its `Proxy-Authorization` credentials inside TLS instead of in clear text.

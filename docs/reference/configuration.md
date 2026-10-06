@@ -110,6 +110,7 @@ Every variable the code reads. "Mode" says where it has an effect: both, header 
 | `TUNNEL_ADDR` | empty (off) | CONNECT tunnel listen address (header only) | [tunnel](configuration/tunnel.md#tunnel_addr) |
 | `TUNNEL_ALLOW_PORTS` | `443` | Reachable target ports of the tunnel | [tunnel](configuration/tunnel.md#tunnel_allow_ports) |
 | `TUNNEL_IDLE_TIMEOUT` | `10m` | Close a tunnel after this idle time | [tunnel](configuration/tunnel.md#tunnel_idle_timeout) |
+| `TUNNEL_MAX_CONNECTIONS` | `300` | Cap on concurrent tunnels, `0` = unlimited | [tunnel](configuration/tunnel.md#tunnel_max_connections) |
 | `TUNNEL_TLS_CERT_FILE`, `TUNNEL_TLS_KEY_FILE` | empty | PEM pair enabling TLS on the tunnel listener | [tunnel](configuration/tunnel.md#tunnel_tls_cert_file-tunnel_tls_key_file) |
 | `METRICS_ADDR` | empty (off) | Prometheus listener address | [metrics](configuration/metrics.md#metrics_addr) |
 | `METRICS_LOCATION` | empty | Constant `location` label on metrics | [metrics](configuration/metrics.md#metrics_location) |

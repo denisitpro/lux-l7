@@ -631,3 +631,110 @@ func TestShutdownForceClosesOpenTunnels(t *testing.T) {
 		t.Fatal("open tunnel must be closed after the shutdown budget")
 	}
 }
+
+// openTunnel establishes a tunnel and fails the test unless it is accepted.
+func openTunnel(t *testing.T, addr, target string, hdr map[string]string) net.Conn {
+	t.Helper()
+	c := dial(t, addr, nil)
+	res, _ := connect(t, c, target, hdr)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	return c
+}
+
+func TestCapacityRefusesBeyondLimitAndFreesSlot(t *testing.T) {
+	_, port := tcpServer(t, echo)
+	target := "127.0.0.1:" + strconv.Itoa(port)
+	cfg := baseCfg(port)
+	cfg.TunnelMaxConnections = 2
+	addr, _ := start(t, cfg)
+
+	first := openTunnel(t, addr, target, nil)
+	openTunnel(t, addr, target, nil)
+
+	res := expectStatus(t, addr, target, nil, http.StatusServiceUnavailable)
+	if got := res.Header.Get("Retry-After"); got != "1" {
+		t.Fatalf("Retry-After = %q", got)
+	}
+	if !res.Close {
+		t.Fatal("capacity refusal must close the connection")
+	}
+
+	_ = first.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		c := dial(t, addr, nil)
+		res, _ := connect(t, c, target, nil)
+		if res.StatusCode == http.StatusOK {
+			return
+		}
+		if res.StatusCode != http.StatusServiceUnavailable || time.Now().After(deadline) {
+			t.Fatalf("slot not freed after a tunnel closed, status = %d", res.StatusCode)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestCapacityErrorBody(t *testing.T) {
+	_, port := tcpServer(t, echo)
+	target := "127.0.0.1:" + strconv.Itoa(port)
+	cfg := baseCfg(port)
+	cfg.TunnelMaxConnections = 1
+	addr, _ := start(t, cfg)
+	openTunnel(t, addr, target, nil)
+
+	c := dial(t, addr, nil)
+	if _, err := io.WriteString(c, connectReq(target, nil)); err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.ReadResponse(bufio.NewReader(c), &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), `"error":"tunnel_capacity"`) {
+		t.Fatalf("status = %d, body = %s", res.StatusCode, body)
+	}
+}
+
+func TestCapacityCheckedAfterAuth(t *testing.T) {
+	_, port := tcpServer(t, echo)
+	target := "127.0.0.1:" + strconv.Itoa(port)
+	cfg := withAuth(baseCfg(port))
+	cfg.TunnelMaxConnections = 1
+	addr, _ := start(t, cfg)
+	openTunnel(t, addr, target, basic("u", testToken))
+
+	// A client without valid credentials must not learn that the proxy is full.
+	expectStatus(t, addr, target, nil, http.StatusProxyAuthRequired)
+	expectStatus(t, addr, target, basic("u", testToken), http.StatusServiceUnavailable)
+}
+
+func TestCapacitySlotReleasedOnDialFailure(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := l.Addr().(*net.TCPAddr).Port
+	_ = l.Close() // nothing listens here now
+	_, live := tcpServer(t, echo)
+	cfg := baseCfg(dead, live)
+	cfg.TunnelMaxConnections = 1
+	addr, _ := start(t, cfg)
+
+	// A leaked slot would turn the second or third attempt into 503.
+	for range 3 {
+		expectStatus(t, addr, "127.0.0.1:"+strconv.Itoa(dead), nil, http.StatusBadGateway)
+	}
+	openTunnel(t, addr, "127.0.0.1:"+strconv.Itoa(live), nil)
+}
+
+func TestCapacityZeroIsUnlimited(t *testing.T) {
+	_, port := tcpServer(t, echo)
+	target := "127.0.0.1:" + strconv.Itoa(port)
+	addr, _ := start(t, baseCfg(port)) // TunnelMaxConnections == 0
+	for range 20 {
+		openTunnel(t, addr, target, nil)
+	}
+}
