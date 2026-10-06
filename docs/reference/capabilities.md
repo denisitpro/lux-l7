@@ -86,16 +86,16 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 ### Target validation and body limit
 
-- **What:** the header-mode target must be a non-empty host with an optional port `1..65535` and no userinfo, path, query or fragment characters (`400 bad_target`). Request bodies above `UPSTREAM_MAX_BYTES` are refused: `413 body_too_large` when `Content-Length` says so up front, otherwise the body is cut while streaming.
+- **What:** the header-mode target must be a non-empty host with an optional port `1..65535` and no userinfo, path, query or fragment characters (`400 bad_target`). Request bodies above `UPSTREAM_MAX_BYTES` are refused: `413 body_too_large` when `Content-Length` says so up front, otherwise (chunked) the body is cut while streaming and the proxy answers `413 body_too_large` too.
 - **Enable:** always on; `UPSTREAM_MAX_BYTES` (default 32 MiB, must be > 0).
-- **Limits:** a chunked body over the limit surfaces as a transport error (`502`), not `413`; tracked in [#6](https://github.com/denisitpro/lux-l7/issues/6). Applies to route mode too.
+- **Limits:** applies to route mode too.
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); validation [#30](https://github.com/denisitpro/lux-l7/pull/30).
 
 ## Protocol support
 
 - **HTTP/1.1 from clients:** the main listener has no TLS configuration and no h2c, so it serves HTTP/1.x; TLS is expected to end at an ingress. The tunnel TLS listener offers ALPN `http/1.1` only.
 - **HTTP to upstream:** both modes use a transport with `ForceAttemptHTTP2: true`, so an https upstream may be spoken to over HTTP/2 when it negotiates `h2`; the code does nothing more. TLS to upstream is 1.2 or higher.
-- **WebSocket and streaming through header or route mode:** no code or test handles `Upgrade` explicitly; behaviour is whatever `httputil.ReverseProxy` does. The HTTP server's read and write timeouts (`HTTP_READ_TIMEOUT`, `HTTP_WRITE_TIMEOUT`, default 30s) can cut long streams; tracked in [#6](https://github.com/denisitpro/lux-l7/issues/6). For long-lived exchange WebSocket connections use the CONNECT tunnel (add ports 8443 and 9443 to `TUNNEL_ALLOW_PORTS`), which has no read or write timeout.
+- **WebSocket and streaming through header or route mode:** SSE, long downloads, slow uploads and WebSocket (`Upgrade`, then bytes both ways) pass through `httputil.ReverseProxy`; tests cover SSE and a raw WebSocket handshake in both modes. `HTTP_READ_TIMEOUT` and `HTTP_WRITE_TIMEOUT` default to `0` (off); the protection is `HTTP_READ_HEADER_TIMEOUT`, `HTTP_IDLE_TIMEOUT` and the upstream response-header wait (`UPSTREAM_TIMEOUT`). Setting a non-zero read or write timeout caps the whole request or response and cuts streams again ([#6](https://github.com/denisitpro/lux-l7/issues/6)). The CONNECT tunnel remains an option for raw long-lived connections (add ports 8443 and 9443 to `TUNNEL_ALLOW_PORTS`).
 - **Upstream errors:** an upstream timeout is `504 upstream_timeout`; another dial or transport error `502 bad_gateway`; a client cancel gets no response (debug log). Same in both modes and in the tunnel dial.
 - **Paths:** passed verbatim, no cleaning or redirects (`//a//b`, `/a/../b`).
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); error mapping and verbatim paths [#30](https://github.com/denisitpro/lux-l7/pull/30).

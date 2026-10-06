@@ -35,8 +35,8 @@ Nothing is required to start. With no variables the service runs in header mode 
 |---|---|---|
 | `HTTP_ADDR` | `:8080` | Main listener address. |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Also bounds reading the `CONNECT` request on the tunnel. |
-| `HTTP_READ_TIMEOUT` | `30s` | Main listener only. Limits request and streaming duration. |
-| `HTTP_WRITE_TIMEOUT` | `30s` | Main listener only. Limits response and streaming duration. |
+| `HTTP_READ_TIMEOUT` | `0` (off) | Main listener only. Caps the whole request including the body; a non-zero value cuts slow uploads. `0` is allowed, negative fails startup. |
+| `HTTP_WRITE_TIMEOUT` | `0` (off) | Main listener only. Caps the whole response; a non-zero value cuts SSE, long downloads and WebSocket after upgrade. `0` is allowed, negative fails startup. |
 | `HTTP_IDLE_TIMEOUT` | `120s` | Main listener keep-alive idle time. |
 | `SHUTDOWN_TIMEOUT` | `15s` | Drain budget for both listeners; must be > 0. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` (or `warning`), `error`; anything else fails startup. |
