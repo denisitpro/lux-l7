@@ -95,4 +95,4 @@ Client sends an ordinary request; the proxy picks the upstream from the `Host` h
 
 Matching: the request `Host` is lowercased, port and one trailing dot removed, then compared with the route `host` (exact, or a leading-dot suffix that also matches the bare domain). `path_prefix` matches on a segment boundary (`/api` matches `/api` and `/api/x`, not `/apix`); `/` matches everything. First match in `ROUTES` order wins. With `rewrite_prefix` set, the matched prefix is replaced by it; the query string is kept.
 
-The upstream request carries `X-L7-Hops` incremented by one, `X-Forwarded-For`, `X-Forwarded-Host` and `X-Forwarded-Proto`; the `X-L7-Target-*` and `X-L7-Proxy-Token` headers are removed. The route table format is in [`configuration.md`](configuration.md).
+The upstream request carries `X-L7-Hops` incremented by one, `X-Forwarded-For`, `X-Forwarded-Host` and `X-Forwarded-Proto`; the `X-L7-Target-*` and `X-L7-Proxy-Token` headers are removed. The route table format is in [`configuration/routes.md`](configuration/routes.md).
