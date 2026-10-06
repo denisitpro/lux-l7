@@ -30,7 +30,7 @@ In route mode clients send ordinary requests. The proxy takes the request `Host`
 | Field | Required | Meaning |
 |---|---|---|
 | `host` | yes | The incoming `Host` to match. Exact (`example.com`), or a leading-dot suffix (`.example.com`) that matches the apex and every subdomain. Case-insensitive; a port or trailing dot in the incoming `Host` is ignored. |
-| `path_prefix` | yes | Must start with `/`. Matches on a segment boundary: `/api` matches `/api` and `/api/x`, not `/apix`. `/` matches everything. |
+| `path_prefix` | yes | Must start with `/`. Matches on a segment boundary: `/api` matches `/api` and `/api/x`, not `/apix`. `/` matches everything. A trailing slash is dropped at load (`/api/` is `/api`), so it cannot make the route miss subpaths; `rewrite_prefix` works the same either way. |
 | `upstream` | yes | Origin to forward to: `http://` or `https://`, host and optional port. No userinfo, path, query or fragment. |
 | `rewrite_prefix` | no | Replaces the matched `path_prefix`; must start with `/` when set. `/` strips the prefix. Empty or absent leaves the path unchanged. |
 | `host_header` | no | The `Host` sent to the upstream, port kept as written. Default: the `upstream` host plus its port, not the route `host`. |
