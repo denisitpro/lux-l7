@@ -34,6 +34,14 @@ go run ./cmd/lux-l7
 
 Release = git tag on `main`, plain semver without `v` (`0.2.0`), same as the sibling Go service. Pre-alpha line: bump the patch (`0.2.1`, `0.2.2`, …) per release until the owner declares the alpha ready. A tag push publishes the image via `.github/workflows/docker-release.yml`.
 
+When the agent finishes a batch of tasks and merges them, it tags the next patch release itself (`0.2.X` → `0.2.X+1`, annotated signed tag: `git tag -m <ver> <ver>`), pushes the tag and checks the docker-build run is green. Minor/major bumps only on the owner's word.
+
+## CI/CD reference
+
+rate-hub is the CI/CD reference for every backend repo (#26): `.github/workflows/`, `.github/actions/go-toolchain`, `Dockerfile`, Makefile CI targets, `.golangci.yml`, Dependabot are copied from it with minimal edits; a deviation is a bug. Intentional deviations: Debian 13 base images (#27), plain-semver tags, single binary, no catalog/oasdiff checks.
+
+CI runs only on push to `main` (no `pull_request` trigger, on purpose: limited GitHub minutes, a red `main` is the tripwire for a skipped local check). Before reporting any work as done, run `make check` (`check-go-version` + `lint` + `test` + `vuln`) and quote the result; for a change to the `Dockerfile`, its build args, `.github/` or the `Makefile`, also run `make docker`. A red run on `main` is an agent-discipline defect, not "CI doing its job".
+
 ## Hard rules
 
 - Do not run `kubectl apply` or cluster mutations unless the owner explicitly approves in chat.

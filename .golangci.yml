@@ -11,6 +11,9 @@ linters:
     - ineffassign
     - staticcheck
     - unused
+  exclusions:
+    presets:
+      - common-false-positives
 
 formatters:
   enable:

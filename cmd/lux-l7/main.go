@@ -29,7 +29,7 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(logger)
 
-	logger.Info("starting", "version", version.Build)
+	logger.Info("starting", "version", version.Build, "commit", version.Commit, "ref", version.Ref, "built_at", version.BuiltAt)
 
 	var appHandler http.Handler
 	var authValidator *auth.Validator
