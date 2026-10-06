@@ -47,7 +47,7 @@ func TestUpstreamGuardDefaultsAndPorts(t *testing.T) {
 }
 
 func TestUnparsableBoolFailsLoad(t *testing.T) {
-	for _, key := range []string{"AUTH_ENABLED", "UPSTREAM_ALLOW_HTTP", "UPSTREAM_ALLOW_PRIVATE"} {
+	for _, key := range []string{"UPSTREAM_ALLOW_HTTP", "UPSTREAM_ALLOW_PRIVATE"} {
 		t.Run(key, func(t *testing.T) {
 			t.Setenv(key, "yes")
 			_, err := config.Load()

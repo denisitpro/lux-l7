@@ -31,7 +31,7 @@ func TestTunnelConfigValidation(t *testing.T) {
 		want string // empty: must load
 	}{
 		{"enabled with allow-list", map[string]string{"TUNNEL_ADDR": ":8443", "UPSTREAM_ALLOW_SUFFIXES": "example.com"}, ""},
-		{"enabled with auth, empty allow-list", map[string]string{"TUNNEL_ADDR": ":8443", "AUTH_ENABLED": "true", "PROXY_AUTH_TOKEN": "t"}, ""},
+		{"enabled with auth, empty allow-list", map[string]string{"TUNNEL_ADDR": ":8443", "PROXY_AUTH_TOKEN": "t"}, ""},
 		{"open relay", map[string]string{"TUNNEL_ADDR": ":8443"}, "open CONNECT relay"},
 		{"deny list alone is not a policy", map[string]string{"TUNNEL_ADDR": ":8443", "UPSTREAM_DENY_HOSTS": "x.example.com"}, "open CONNECT relay"},
 		{"route mode", map[string]string{"TUNNEL_ADDR": ":8443", "PROXY_MODE": "route", "ROUTES": `[{"host":"example.com","path_prefix":"/","upstream":"https://origin.example.com"}]`}, "PROXY_MODE=route"},

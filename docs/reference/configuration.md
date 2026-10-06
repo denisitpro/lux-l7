@@ -27,7 +27,7 @@ Nothing is required to start. With no variables the service runs in header mode 
 | `PROXY_MODE` | `header` | `header` or `route`. |
 | `PROXY_AUTH_TOKEN` | unset | See above. Both token variables set is a startup error; either set in route mode is a startup error. |
 | `PROXY_AUTH_HOST_MAP` | unset | See above. |
-| `AUTH_ENABLED`, `AUTH_MODE` | unset | Legacy, not needed. Only checked for contradictions: `AUTH_ENABLED=true` without a token, `AUTH_ENABLED=false` with a token, an `AUTH_MODE` (`instance` or `per_host`) that disagrees with the token variable set, and `AUTH_ENABLED=true` in route mode are startup errors. A set value logs a warning asking to remove it. |
+| `AUTH_ENABLED`, `AUTH_MODE` | removed | Both are ignored (value never parsed) and log a startup warning that states the actual auth state. |
 
 ### Listener and shutdown
 
@@ -97,4 +97,4 @@ Generate each token with `openssl rand -hex 32` (64 hex characters). A token can
 
 ## Startup errors
 
-The process exits at startup, never degrades silently, on: an unparsable boolean, duration, integer or port; a duration or byte limit that must be > 0 and is not; unknown `PROXY_MODE`, `UPSTREAM_DEFAULT_SCHEME`, `LOG_LEVEL` or `AUTH_MODE`; `ROUTES` set in header mode or missing or invalid in route mode; both token variables set; a token variable or `AUTH_ENABLED=true` in route mode; `TUNNEL_ADDR` in route mode; an open tunnel (no auth and no allow list); one TLS file without the other or an unreadable pair; policy entries with a port.
+The process exits at startup, never degrades silently, on: an unparsable boolean, duration, integer or port; a duration or byte limit that must be > 0 and is not; unknown `PROXY_MODE`, `UPSTREAM_DEFAULT_SCHEME`, or `LOG_LEVEL`; `ROUTES` set in header mode or missing or invalid in route mode; both token variables set; a token variable in route mode; `TUNNEL_ADDR` in route mode; an open tunnel (no auth and no allow list); one TLS file without the other or an unreadable pair; policy entries with a port.
