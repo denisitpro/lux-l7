@@ -14,11 +14,10 @@ import (
 
 // Validator checks X-L7-Proxy-Token when auth is enabled.
 type Validator struct {
-	enabled      bool
-	mode         config.AuthMode
-	instanceHash [sha256.Size]byte
-	hasInstance  bool
-	hostHashes   map[string][sha256.Size]byte
+	enabled        bool
+	mode           config.AuthMode
+	instanceHashes [][sha256.Size]byte
+	hostHashes     map[string][sha256.Size]byte
 }
 
 // New builds a validator from process configuration.
@@ -32,11 +31,10 @@ func New(cfg config.Config) (*Validator, error) {
 	}
 	switch cfg.AuthMode {
 	case config.AuthModeInstance:
-		if cfg.InstanceToken == "" {
+		v.instanceHashes = hashTokens(cfg.InstanceToken)
+		if len(v.instanceHashes) == 0 {
 			return nil, fmt.Errorf("instance token missing")
 		}
-		v.instanceHash = sha256.Sum256([]byte(cfg.InstanceToken))
-		v.hasInstance = true
 	case config.AuthModePerHost:
 		if cfg.HostTokenJSON == "" {
 			return nil, fmt.Errorf("host token map missing")
@@ -62,6 +60,34 @@ func New(cfg config.Config) (*Validator, error) {
 	return v, nil
 }
 
+// hashTokens splits a comma-separated token list (whitespace trimmed, empty
+// items dropped, duplicates collapsed) and returns the SHA-256 of each token.
+func hashTokens(raw string) [][sha256.Size]byte {
+	var out [][sha256.Size]byte
+	seen := map[[sha256.Size]byte]struct{}{}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		h := sha256.Sum256([]byte(part))
+		if _, dup := seen[h]; dup {
+			continue
+		}
+		seen[h] = struct{}{}
+		out = append(out, h)
+	}
+	return out
+}
+
+// InstanceTokenCount reports how many instance tokens are configured.
+func (v *Validator) InstanceTokenCount() int {
+	if v == nil {
+		return 0
+	}
+	return len(v.instanceHashes)
+}
+
 // Enabled reports whether tokens are required.
 func (v *Validator) Enabled() bool {
 	return v != nil && v.enabled
@@ -78,10 +104,13 @@ func (v *Validator) Authorize(token, targetAuthority string) bool {
 	sum := sha256.Sum256([]byte(token))
 	switch v.mode {
 	case config.AuthModeInstance:
-		if !v.hasInstance {
-			return false
+		// Compare against every hash and never exit early, so timing does not
+		// reveal which entry matched.
+		ok := 0
+		for i := range v.instanceHashes {
+			ok |= subtle.ConstantTimeCompare(sum[:], v.instanceHashes[i][:])
 		}
-		return subtle.ConstantTimeCompare(sum[:], v.instanceHash[:]) == 1
+		return ok == 1
 	case config.AuthModePerHost:
 		host := mapHostKey(targetAuthority)
 		want, ok := v.hostHashes[host]

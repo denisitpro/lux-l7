@@ -44,6 +44,9 @@ func main() {
 			logger.Error("auth", "err", err)
 			os.Exit(1)
 		}
+		if cfg.AuthEnabled && cfg.AuthMode == config.AuthModeInstance {
+			logger.Info("auth", "mode", "instance", "tokens", authValidator.InstanceTokenCount())
+		}
 		appHandler = proxy.New(cfg, authValidator, logger)
 	}
 

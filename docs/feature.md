@@ -11,6 +11,9 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 - L7 reverse proxy: `X-L7-Target-Host`, optional `X-L7-Target-Scheme` (default from `UPSTREAM_DEFAULT_SCHEME`).
 - Upstream allow/deny via `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES`, `UPSTREAM_DENY_HOSTS`.
 - Auth optional (`AUTH_ENABLED=false` by default): `X-L7-Proxy-Token`, modes `instance` / `per_host`.
+- Instance mode takes several tokens: `PROXY_AUTH_TOKEN=tok-a,tok-b,tok-c` (comma-separated, whitespace around items trimmed, empty items and duplicates dropped; a token cannot contain a comma). A request passes if its token matches any one entry; this holds for header mode and the CONNECT tunnel. Give each client its own token and revoke one by removing it and redeploying. Only SHA-256 hashes are kept; the presented token is hashed once and compared in constant time against every stored hash with no early exit. No valid token with auth on is a startup error; the token count (never the values) is logged at startup. `per_host` is unchanged.
+  - Generate tokens with `openssl rand -hex 32` (64 hex chars).
+  - Capacity: one env var value is capped by the kernel (Linux `MAX_ARG_STRLEN` = 128 KiB per env string) and a Kubernetes Secret by 1 MiB. With 64-char tokens plus a comma that is about 2000 tokens. Cost per request is one SHA-256 plus N 32-byte compares, negligible at that size.
 - Routing headers stripped before the upstream request; in header mode a client `X-L7-Hops` is stripped too.
 - Target validation (header mode, `400 bad_target`): no userinfo (`@`), non-empty host, numeric port `1..65535`. One trailing dot in the host is dropped (`localhost.` is `localhost`) before policy, auth and dial.
 - Plain-http upstreams are off by default: `X-L7-Target-Scheme: http` is `400 bad_target` unless `UPSTREAM_ALLOW_HTTP=true`; `UPSTREAM_DEFAULT_SCHEME=http` without it fails at startup.
