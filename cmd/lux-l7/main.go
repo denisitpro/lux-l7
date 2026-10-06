@@ -11,6 +11,7 @@ import (
 
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/config"
+	"github.com/denisitpro/lux-l7/internal/front"
 	"github.com/denisitpro/lux-l7/internal/proxy"
 	"github.com/denisitpro/lux-l7/internal/relay"
 	"github.com/denisitpro/lux-l7/internal/version"
@@ -47,21 +48,9 @@ func main() {
 		logger.Warn("auth disabled: do not expose this configuration on the public internet")
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	mux.HandleFunc("GET /version", version.Handler)
-	mux.Handle("/", appHandler)
-
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           mux,
+		Handler:           front.New(appHandler),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,

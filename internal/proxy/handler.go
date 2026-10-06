@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,8 +67,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
 		Transport: tr,
 		Rewrite:   h.rewrite,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			h.log.Error("upstream", "err", err, "path", r.URL.Path)
-			WriteJSON(w, http.StatusBadGateway, "bad_gateway", "upstream request failed")
+			WriteUpstreamError(w, h.log, err, "path", r.URL.Path)
 		},
 	}
 	h.proxy = rp
@@ -75,7 +75,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	t, err := parseTarget(r, h.cfg.UpstreamScheme)
+	t, err := parseTarget(r, h.cfg.UpstreamScheme, h.cfg.UpstreamAllowHTTP)
 	if err != nil {
 		WriteJSON(w, http.StatusBadRequest, "bad_target", err.Error())
 		return
@@ -111,14 +111,16 @@ func (h *Handler) rewrite(pr *httputil.ProxyRequest) {
 	pr.Out.URL.Host = t.host
 	pr.Out.Host = t.host
 	StripRoutingHeaders(pr.Out.Header)
+	// Hops is a route-mode loop guard; header mode never forwards a client value.
+	pr.Out.Header.Del(headers.Hops)
 }
 
-func parseTarget(r *http.Request, defaultScheme string) (target, error) {
+func parseTarget(r *http.Request, defaultScheme string, allowHTTP bool) (target, error) {
 	rawHost := strings.TrimSpace(r.Header.Get(headers.TargetHost))
 	if rawHost == "" {
 		return target{}, errors.New("missing X-L7-Target-Host")
 	}
-	if strings.ContainsAny(rawHost, "/\\?#") {
+	if strings.ContainsAny(rawHost, "/\\?#@") {
 		return target{}, errors.New("invalid X-L7-Target-Host")
 	}
 	rawHost = strings.ToLower(rawHost)
@@ -133,12 +135,29 @@ func parseTarget(r *http.Request, defaultScheme string) (target, error) {
 	if scheme != "http" && scheme != "https" {
 		return target{}, errors.New("invalid X-L7-Target-Scheme")
 	}
+	if scheme == "http" && !allowHTTP {
+		return target{}, errors.New("http upstream scheme is disabled")
+	}
 
-	if _, _, err := net.SplitHostPort(rawHost); err != nil {
-		if strings.Contains(rawHost, ":") {
+	host, port := rawHost, ""
+	if strings.Contains(rawHost, ":") {
+		var err error
+		host, port, err = net.SplitHostPort(rawHost)
+		if err != nil {
+			return target{}, errors.New("invalid X-L7-Target-Host port")
+		}
+		if n, err := strconv.ParseUint(port, 10, 16); err != nil || n == 0 {
 			return target{}, errors.New("invalid X-L7-Target-Host port")
 		}
 	}
+	// One trailing dot is the same DNS name; keep it out of policy and dial.
+	host = strings.TrimSuffix(host, ".")
+	if host == "" {
+		return target{}, errors.New("invalid X-L7-Target-Host")
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	}
 
-	return target{scheme: scheme, host: rawHost}, nil
+	return target{scheme: scheme, host: host}, nil
 }

@@ -26,7 +26,7 @@ func New(allowHosts, allowSuffixes, denyHosts []string) *Policy {
 		}
 	}
 	for _, s := range allowSuffixes {
-		s = strings.TrimSpace(strings.ToLower(s))
+		s = normalizeHost(s)
 		if s == "" {
 			continue
 		}
@@ -78,9 +78,11 @@ func hostname(authority string) string {
 	if err != nil {
 		return authority
 	}
-	return host
+	return normalizeHost(host)
 }
 
+// normalizeHost lowercases and drops one trailing dot, so "localhost." and
+// "localhost" are the same name for deny and allow decisions.
 func normalizeHost(raw string) string {
-	return strings.ToLower(strings.TrimSpace(raw))
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
 }

@@ -1,8 +1,11 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"net"
 	"net/http"
 
 	"github.com/denisitpro/lux-l7/internal/headers"
@@ -32,4 +35,21 @@ func StripRoutingHeaders(h http.Header) {
 	h.Del(headers.TargetHost)
 	h.Del(headers.TargetScheme)
 	h.Del(headers.ProxyToken)
+}
+
+// WriteUpstreamError answers a failed upstream round trip. A client cancel gets no
+// response (nobody is listening) and is logged at debug; an upstream timeout is a
+// 504; any other dial or transport failure is a 502. attrs are extra log fields.
+func WriteUpstreamError(w http.ResponseWriter, log *slog.Logger, err error, attrs ...any) {
+	var netErr net.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		log.Debug("client canceled", append([]any{"err", err}, attrs...)...)
+	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()):
+		log.Warn("upstream timeout", append([]any{"err", err}, attrs...)...)
+		WriteJSON(w, http.StatusGatewayTimeout, "upstream_timeout", "upstream request timed out")
+	default:
+		log.Error("upstream", append([]any{"err", err}, attrs...)...)
+		WriteJSON(w, http.StatusBadGateway, "bad_gateway", "upstream request failed")
+	}
 }

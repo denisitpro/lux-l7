@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -63,6 +64,9 @@ type Config struct {
 	UpstreamTimeout  time.Duration
 	UpstreamMaxBytes int64
 	UpstreamScheme   string
+	// UpstreamAllowHTTP permits plain-http upstreams in header mode (default scheme or
+	// X-L7-Target-Scheme). Off by default so a client cannot downgrade the upstream hop.
+	UpstreamAllowHTTP bool
 
 	AllowHosts    []string
 	AllowSuffixes []string
@@ -91,6 +95,15 @@ func Load() (Config, error) {
 		routeMaxHops = n
 	}
 
+	authEnabled, err := envBool("AUTH_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	allowHTTP, err := envBool("UPSTREAM_ALLOW_HTTP", false)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		HTTPAddr:          envOr("HTTP_ADDR", defaultHTTPAddr),
 		ProxyMode:         mode,
@@ -106,7 +119,8 @@ func Load() (Config, error) {
 		AllowHosts:        splitCSV(envOr("UPSTREAM_ALLOW_HOSTS", "")),
 		AllowSuffixes:     splitCSV(envOr("UPSTREAM_ALLOW_SUFFIXES", "")),
 		DenyHosts:         splitCSV(envOr("UPSTREAM_DENY_HOSTS", "")),
-		AuthEnabled:       envBool("AUTH_ENABLED", false),
+		UpstreamAllowHTTP: allowHTTP,
+		AuthEnabled:       authEnabled,
 		AuthMode:          AuthMode(envOr("AUTH_MODE", string(AuthModeInstance))),
 		InstanceToken:     strings.TrimSpace(os.Getenv("PROXY_AUTH_TOKEN")),
 		HostTokenJSON:     strings.TrimSpace(os.Getenv("PROXY_AUTH_HOST_MAP")),
@@ -178,6 +192,16 @@ func fillDurations(cfg *Config) error {
 }
 
 func validate(cfg *Config, routesRaw string) error {
+	// Zero or negative values would silently disable the limit or time out at once.
+	if cfg.UpstreamMaxBytes <= 0 {
+		return fmt.Errorf("UPSTREAM_MAX_BYTES must be > 0, got %d", cfg.UpstreamMaxBytes)
+	}
+	if cfg.UpstreamTimeout <= 0 {
+		return fmt.Errorf("UPSTREAM_TIMEOUT must be > 0, got %s", cfg.UpstreamTimeout)
+	}
+	if cfg.ShutdownTimeout <= 0 {
+		return fmt.Errorf("SHUTDOWN_TIMEOUT must be > 0, got %s", cfg.ShutdownTimeout)
+	}
 	switch cfg.ProxyMode {
 	case ProxyModeHeader, ProxyModeRoute:
 	default:
@@ -205,6 +229,26 @@ func validate(cfg *Config, routesRaw string) error {
 	case "http", "https":
 	default:
 		return fmt.Errorf("UPSTREAM_DEFAULT_SCHEME must be http or https, got %q", cfg.UpstreamScheme)
+	}
+	if cfg.ProxyMode == ProxyModeHeader {
+		if cfg.UpstreamScheme == "http" && !cfg.UpstreamAllowHTTP {
+			return fmt.Errorf("UPSTREAM_DEFAULT_SCHEME=http requires UPSTREAM_ALLOW_HTTP=true")
+		}
+		// Policy compares bare hostnames: an entry with a port would never match.
+		for _, key := range []struct {
+			name    string
+			entries []string
+		}{
+			{"UPSTREAM_ALLOW_HOSTS", cfg.AllowHosts},
+			{"UPSTREAM_ALLOW_SUFFIXES", cfg.AllowSuffixes},
+			{"UPSTREAM_DENY_HOSTS", cfg.DenyHosts},
+		} {
+			for _, e := range key.entries {
+				if _, _, err := net.SplitHostPort(e); err == nil {
+					return fmt.Errorf("%s: entry %q must be a bare hostname without a port", key.name, e)
+				}
+			}
+		}
 	}
 	switch cfg.AuthMode {
 	case AuthModeInstance, AuthModePerHost:
@@ -236,16 +280,18 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-func envBool(key string, fallback bool) bool {
+// envBool fails on an unparsable value: silently falling back would turn a typo
+// such as AUTH_ENABLED=yes into "auth off".
+func envBool(key string, fallback bool) (bool, error) {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
-		return fallback
+		return fallback, nil
 	}
 	b, err := strconv.ParseBool(raw)
 	if err != nil {
-		return fallback
+		return false, fmt.Errorf("%s: invalid boolean %q (use true or false)", key, raw)
 	}
-	return b
+	return b, nil
 }
 
 func splitCSV(raw string) []string {
