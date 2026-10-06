@@ -255,12 +255,6 @@ func validate(cfg *Config, routesRaw string) error {
 	if cfg.WriteTimeout < 0 {
 		return fmt.Errorf("HTTP_WRITE_TIMEOUT must be >= 0, got %s", cfg.WriteTimeout)
 	}
-	if cfg.ReadTimeout < 0 {
-		return fmt.Errorf("HTTP_READ_TIMEOUT must be >= 0, got %s", cfg.ReadTimeout)
-	}
-	if cfg.WriteTimeout < 0 {
-		return fmt.Errorf("HTTP_WRITE_TIMEOUT must be >= 0, got %s", cfg.WriteTimeout)
-	}
 	if cfg.TunnelIdleTimeout <= 0 {
 		return fmt.Errorf("TUNNEL_IDLE_TIMEOUT must be > 0, got %s", cfg.TunnelIdleTimeout)
 	}
