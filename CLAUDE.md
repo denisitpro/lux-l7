@@ -28,7 +28,7 @@ go run ./cmd/lux-l7
 ## Docs
 
 - What lux-l7 can do: [`docs/reference/capabilities.md`](docs/reference/capabilities.md)
-- Client protocol: [`docs/reference/protocol.md`](docs/reference/protocol.md); env variables: [`docs/reference/configuration.md`](docs/reference/configuration.md)
+- Client protocol: [`docs/reference/protocol.md`](docs/reference/protocol.md); env variables (configuration guide): [`docs/reference/configuration.md`](docs/reference/configuration.md)
 - Doc index: [`docs/README.md`](docs/README.md)
 
 ## Versioning
@@ -46,6 +46,7 @@ CI runs only on push to `main` (no `pull_request` trigger, on purpose: limited G
 ## Hard rules
 
 - A PR that adds or changes a capability updates `docs/reference/capabilities.md` in the same PR.
+- A PR that adds or changes an env parameter updates the configuration guide (`docs/reference/configuration.md` and its topic page under `docs/reference/configuration/`) in the same PR.
 - Do not run `kubectl apply` or cluster mutations unless the owner explicitly approves in chat.
 - Git flow is the agent's job end to end, no asking: work on a `<issue>-<desc>` branch, commit, push, open the PR (`Closes #N`), merge it yourself (`gh pr merge --merge --delete-branch`), switch the local tree back to an up-to-date `main`, then confirm the `ci` run on `main` is green (CI runs only on push to `main`, not on PRs; a red run is fixed right away in a new branch). This overrides the global "only the owner merges" rule for this repo (owner's order, 2026-10-05).
 - Never merge unreviewed subagent/Cursor output: before merging, the orchestrator reads the diff and runs `make test` / `make lint` locally; that is the pre-merge gate.

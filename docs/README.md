@@ -10,7 +10,8 @@ Read `../CLAUDE.md` first, then the one document the question below points at.
 |---|---|
 | What can lux-l7 do, how is each thing enabled, what are its limits | [`reference/capabilities.md`](reference/capabilities.md) |
 | What does a client send, and what error does it get | [`reference/protocol.md`](reference/protocol.md) |
-| What does each env variable mean, what is its default | [`reference/configuration.md`](reference/configuration.md) |
+| How do I configure it: what does each env variable mean, its values, default, and what breaks | [`reference/configuration.md`](reference/configuration.md) (entry, recipes, index of all variables) |
+| Details of one variable group | topic pages in [`reference/configuration/`](reference/configuration/): `listener.md`, `modes-and-auth.md`, `upstream-policy.md`, `tunnel.md`, `routes.md`, `metrics.md` |
 | Why a custom service, why Go | [`reference/prior-art.md`](reference/prior-art.md) |
 | How to run it locally | [`../README.md`](../README.md) |
 | Agent and public-repo rules, release and merge flow | [`../CLAUDE.md`](../CLAUDE.md) (`AGENTS.md` is a symlink) |
@@ -23,7 +24,7 @@ Each class of fact has one owner; everything else links.
 |---|---|
 | Capabilities: what, how enabled, limits, origin PR | `reference/capabilities.md` |
 | Wire contract: headers, status codes, error codes, JSON error shape | `reference/protocol.md` |
-| Env variables: names, defaults, validation, route table fields | `reference/configuration.md` (copy-paste defaults: [`../.env.example`](../.env.example)) |
+| Env variables: names, defaults, accepted values, validation, route table fields | `reference/configuration.md` (index) and `reference/configuration/*.md` (per-variable detail); copy-paste defaults: [`../.env.example`](../.env.example) |
 | Prior art and the language decision | `reference/prior-art.md` |
 | Roadmap and ticket status | [GitHub issues, `label:feature`](https://github.com/denisitpro/lux-l7/issues?q=is%3Aopen+label%3Afeature) |
 | Released versions | git tags |
