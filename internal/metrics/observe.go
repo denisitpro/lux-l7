@@ -35,6 +35,7 @@ const (
 	RejectBadHops          Rejection = "bad_hops"
 	RejectLoopDetected     Rejection = "loop_detected"
 	RejectShuttingDown     Rejection = "shutting_down"
+	RejectTunnelCapacity   Rejection = "tunnel_capacity"
 	RejectInternal         Rejection = "internal"
 )
 

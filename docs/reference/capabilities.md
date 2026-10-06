@@ -137,7 +137,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 - **What:** `/metrics` (text format, plus Go and process collectors) on its own listener, never on `HTTP_ADDR` or the tunnel listener. Series, all prefixed `lux_l7_`, with the constant label `location` when `METRICS_LOCATION` is set:
   - `requests_total{mode,ingress_host,upstream_host,status_class}`: every proxied request, rejections included; `/healthz`, `/readyz`, `/version` are not counted. `mode` is `header|route|tunnel`; `status_class` is `2xx|3xx|4xx|5xx|error` (`error`: no response written, e.g. client cancel). A tunnel is counted when it opens.
   - `request_duration_seconds{mode,status_class}`: histogram (a tunnel's value is its lifetime).
-  - `rejections_total{mode,reason}`: refused before an upstream, reason is a fixed set: `bad_target`, `unauthorized` (header), `proxy_auth_required` (tunnel), `forbidden_host`, `forbidden_port`, `body_too_large` (also a chunked body cut mid-stream), `method_not_allowed`, `no_route`, `bad_hops`, `loop_detected`, `shutting_down`, `internal`.
+  - `rejections_total{mode,reason}`: refused before an upstream, reason is a fixed set: `bad_target`, `unauthorized` (header), `proxy_auth_required` (tunnel), `forbidden_host`, `forbidden_port`, `body_too_large` (also a chunked body cut mid-stream), `method_not_allowed`, `no_route`, `bad_hops`, `loop_detected`, `shutting_down`, `tunnel_capacity`, `internal`.
   - `upstream_errors_total{mode,reason}`: `timeout|blocked|canceled|other`, including tunnel dial failures.
   - `tunnels_active`: gauge of open CONNECT tunnels.
 - **Cardinality:** bounded by configuration, never by clients; one mapping component (`internal/metrics/labels.go`) decides host labels. `ingress_host`: route mode, the matched route's `host` as written (`other` when nothing matched); header mode, the request `Host` (lowercased, no port) only if listed in `METRICS_INGRESS_HOSTS`, else `other`; tunnel, always `other` (the client names only the target). `upstream_host`: route mode, the route's upstream host; header mode and tunnel, the allow-list entry that admitted the target (exact host, or the suffix entry with its leading dot, e.g. `.example.com`), `other` for an open policy or no match. No path, query, client IP, token, method or full status code is ever a label. Upper bound of `requests_total` per process: sum over modes of `(I + 1) x (U + 1) x 5`, with `I` = ingress hosts (`METRICS_INGRESS_HOSTS` entries, or distinct route hosts) and `U` = upstream hosts (allow-list entries, or distinct route upstream hosts); the tunnel has `I = 0`. Across a fleet multiply by the number of locations.
@@ -151,6 +151,13 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 - **Enable:** always on; default 10m, must be > 0.
 - **Limits:** no cap on total tunnel duration.
 - **Origin:** [#32](https://github.com/denisitpro/lux-l7/pull/32).
+
+### Tunnel connection cap
+
+- **What:** at most `TUNNEL_MAX_CONNECTIONS` tunnels are open at once. When the cap is reached a new `CONNECT` is refused before the upstream is dialed with `503 tunnel_capacity`, `Retry-After: 1` and `Connection: close`, and counted as the `tunnel_capacity` rejection. The check runs after credentials, host policy and port checks, so an unauthenticated client never learns the proxy is full and cannot fill it. A slot is released when the tunnel ends, and also on a dial failure or a hijack error.
+- **Enable:** always on; default `300` (below typical file-descriptor limits: each tunnel holds two sockets). `0` means unlimited; a negative or non-integer value fails startup. Only meaningful with `TUNNEL_ADDR`.
+- **Limits:** the cap is per process, not per client or per token. Refused attempts are not queued.
+- **Origin:** issue [#62](https://github.com/denisitpro/lux-l7/issues/62).
 
 ### Tunnel TLS and certificate reload
 

@@ -34,6 +34,9 @@ const (
 	defaultUpstreamPorts     = "80,443,8443,9443"
 	defaultTunnelPorts       = "443"
 	defaultTunnelIdleTimeout = 10 * time.Minute
+	// defaultTunnelMaxConns stays below typical OS and Kubernetes file-descriptor
+	// limits: every tunnel holds two sockets.
+	defaultTunnelMaxConns = 300
 )
 
 // ProxyMode selects header-based or static route-table forwarding.
@@ -97,6 +100,8 @@ type Config struct {
 	TunnelAllowPorts []int
 	// TunnelIdleTimeout closes a tunnel after this long without traffic in either direction.
 	TunnelIdleTimeout time.Duration
+	// TunnelMaxConnections caps concurrent tunnels; 0 means unlimited.
+	TunnelMaxConnections int
 	// TunnelTLSCertFile and TunnelTLSKeyFile enable TLS on the tunnel listener (both or neither).
 	TunnelTLSCertFile string
 	TunnelTLSKeyFile  string
@@ -143,6 +148,11 @@ func Load() (Config, error) {
 		return Config{}, inEveryMode(err)
 	}
 
+	tunnelMaxConns, err := envNonNegInt("TUNNEL_MAX_CONNECTIONS", defaultTunnelMaxConns)
+	if err != nil {
+		return Config{}, inEveryMode(err)
+	}
+
 	cfg := Config{
 		HTTPAddr:             envOr("HTTP_ADDR", defaultHTTPAddr),
 		ProxyMode:            mode,
@@ -167,6 +177,7 @@ func Load() (Config, error) {
 		TunnelAddr:           strings.TrimSpace(os.Getenv("TUNNEL_ADDR")),
 		TunnelAllowPorts:     tunnelPorts,
 		TunnelIdleTimeout:    defaultTunnelIdleTimeout,
+		TunnelMaxConnections: tunnelMaxConns,
 		TunnelTLSCertFile:    strings.TrimSpace(os.Getenv("TUNNEL_TLS_CERT_FILE")),
 		TunnelTLSKeyFile:     strings.TrimSpace(os.Getenv("TUNNEL_TLS_KEY_FILE")),
 		MetricsAddr:          strings.TrimSpace(os.Getenv("METRICS_ADDR")),
@@ -405,6 +416,20 @@ func envBool(key string, fallback bool) (bool, error) {
 		return false, fmt.Errorf("%s: invalid boolean %q (use true or false)", key, raw)
 	}
 	return b, nil
+}
+
+// envNonNegInt parses an integer >= 0; empty yields fallback. Zero is a valid value
+// (the caller decides what it means), a negative or non-integer one is an error.
+func envNonNegInt(key string, fallback int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s: invalid value %q (use an integer >= 0)", key, raw)
+	}
+	return n, nil
 }
 
 func parsePorts(name, raw string) ([]int, error) {
