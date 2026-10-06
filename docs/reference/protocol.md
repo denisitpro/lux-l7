@@ -35,15 +35,15 @@ Checks run in this order; the first failure answers:
 | # | Check | Status / `error` | `detail` |
 |---|---|---|---|
 | 1 | Target syntax: host present, no `/ \ ? # @`, port in `1..65535`; scheme is `http` or `https`; `http` allowed | `400 bad_target` | `missing X-L7-Target-Host`, `invalid X-L7-Target-Host`, `invalid X-L7-Target-Host port`, `invalid X-L7-Target-Scheme`, `http upstream scheme is disabled` |
-| 2 | Host policy | `403 forbidden` | `upstream host not allowed` |
-| 3 | Port allow-list (implicit 443 for https, 80 for http) | `403 forbidden` | `upstream port not allowed` |
-| 4 | Token | `401 unauthorized` | `missing or invalid proxy token` |
+| 2 | Token (only when auth is on; `per_host` keys on the parsed target host) | `401 unauthorized` | `missing or invalid proxy token` |
+| 3 | Host policy | `403 forbidden` | `upstream host not allowed` |
+| 4 | Port allow-list (implicit 443 for https, 80 for http) | `403 forbidden` | `upstream port not allowed` |
 | 5 | Body size (`Content-Length` above `UPSTREAM_MAX_BYTES`) | `413 body_too_large` | `request body too large` |
 | 6 | Dial: resolved IP not public | `403 forbidden` | `upstream address not allowed` |
 | 7 | Dial or round trip: timeout | `504 upstream_timeout` | `upstream request timed out` |
 | 8 | Dial or round trip: other failure | `502 bad_gateway` | `upstream request failed` |
 
-Notes: the host is lowercased and one trailing dot is dropped before policy, auth and dial. Policy and port checks run before the token check, so an unauthenticated client can tell a refused host or port from a bad token. A client that cancels gets no response.
+Notes: the host is lowercased and one trailing dot is dropped before policy, auth and dial. The token is checked before policy and port, so an unauthenticated client gets `401` whatever it targets and cannot probe the allow list or the port list. A client that cancels gets no response.
 
 ## CONNECT tunnel
 
@@ -61,9 +61,9 @@ Proxy-Authorization: Basic base64(user:token)
 |---|---|---|---|
 | 0 | Method is not `CONNECT` | `405 method_not_allowed` | `only CONNECT is supported on the tunnel listener` |
 | 1 | Authority is `host:port` with a valid port, no userinfo | `400 bad_target` | `CONNECT target must be host:port` |
-| 2 | Host policy | `403 forbidden` | `upstream host not allowed` |
-| 3 | `TUNNEL_ALLOW_PORTS` | `403 forbidden` | `upstream port not allowed` |
-| 4 | Credentials | `407 proxy_auth_required` (header `Proxy-Authenticate: Basic realm="lux-l7"`) | `missing or invalid proxy credentials` |
+| 2 | Credentials (only when auth is on) | `407 proxy_auth_required` (header `Proxy-Authenticate: Basic realm="lux-l7"`) | `missing or invalid proxy credentials` |
+| 3 | Host policy | `403 forbidden` | `upstream host not allowed` |
+| 4 | `TUNNEL_ALLOW_PORTS` | `403 forbidden` | `upstream port not allowed` |
 | 5 | Proxy is shutting down | `503 shutting_down` | `proxy is shutting down` |
 | 6 | Dial: blocked IP / timeout / other | `403 forbidden` / `504 upstream_timeout` / `502 bad_gateway` | as in header mode |
 | 7 | Connection cannot be hijacked | `500 internal` | `connection cannot be tunneled` |

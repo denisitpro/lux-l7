@@ -21,7 +21,8 @@ func newTransport(cfg config.Config, rt route.Route, rootCAs *x509.CertPool) *ht
 		ServerName: rt.ServerName,
 	}
 	return &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		// No env proxy: HTTP_PROXY would bypass the per-route SNI = Host guarantee.
+		Proxy: nil,
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
