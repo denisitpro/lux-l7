@@ -22,7 +22,7 @@ Startup rules for a tunnel (any failure exits at startup):
 - **Default:** empty (off).
 - **Change it when:** clients need to carry TLS to a target the proxy must not terminate (exchange APIs with signed requests, WebSocket streams).
 - **Example:** `TUNNEL_ADDR=:8443`
-- **If wrong:** route mode, or no auth and no allow list, fails startup (above). Like `HTTP_ADDR`, a malformed or busy address fails when listening starts. It must differ from `HTTP_ADDR` in practice (one socket per listener), and `METRICS_ADDR` must differ from it.
+- **If wrong:** route mode, or no auth and no allow list, fails startup (above). Like `HTTP_ADDR`, a malformed or busy address fails when listening starts. An address that clashes with `HTTP_ADDR` fails startup (one socket per listener; the clash rule is in [`../configuration.md`](../configuration.md#combinations-that-fail-startup)), and `METRICS_ADDR` must not clash with it either.
 
 ### `TUNNEL_ALLOW_PORTS`
 

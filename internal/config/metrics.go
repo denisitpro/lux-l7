@@ -39,13 +39,17 @@ func validateMetricsAddr(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
-		return fmt.Errorf("port %q is not a number from 0 to 65535", port)
+	n, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		return fmt.Errorf("port %q is not a number from 1 to 65535", port)
 	}
-	if cfg.MetricsAddr == cfg.HTTPAddr {
+	if n == 0 {
+		return fmt.Errorf("port 0 is not allowed: Prometheus needs a fixed port to scrape")
+	}
+	if sameListenAddr(cfg.MetricsAddr, cfg.HTTPAddr) {
 		return fmt.Errorf("must differ from HTTP_ADDR")
 	}
-	if cfg.TunnelAddr != "" && cfg.MetricsAddr == cfg.TunnelAddr {
+	if sameListenAddr(cfg.MetricsAddr, cfg.TunnelAddr) {
 		return fmt.Errorf("must differ from TUNNEL_ADDR")
 	}
 	return nil

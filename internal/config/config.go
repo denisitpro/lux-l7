@@ -72,7 +72,7 @@ type Config struct {
 	// UpstreamAllowHTTP permits plain-http upstreams in header mode (default scheme or
 	// X-L7-Target-Scheme). Off by default so a client cannot downgrade the upstream hop.
 	UpstreamAllowHTTP bool
-	// UpstreamAllowPrivate disables the SSRF guard (header mode): loopback, private,
+	// UpstreamAllowPrivate disables the SSRF guard (header mode and tunnel): loopback, private,
 	// link-local and other non-public resolved IPs become reachable. Local tests only.
 	UpstreamAllowPrivate bool
 	// UpstreamAllowPorts lists the target ports a header-mode client may reach.
@@ -121,26 +121,26 @@ func Load() (Config, error) {
 	if raw := strings.TrimSpace(os.Getenv("ROUTE_MAX_HOPS")); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil {
-			return Config{}, fmt.Errorf("ROUTE_MAX_HOPS: %w", err)
+			return Config{}, inEveryMode(fmt.Errorf("ROUTE_MAX_HOPS: %w", err))
 		}
 		routeMaxHops = n
 	}
 
 	allowHTTP, err := envBool("UPSTREAM_ALLOW_HTTP", false)
 	if err != nil {
-		return Config{}, err
+		return Config{}, inEveryMode(err)
 	}
 	allowPrivate, err := envBool("UPSTREAM_ALLOW_PRIVATE", false)
 	if err != nil {
-		return Config{}, err
+		return Config{}, inEveryMode(err)
 	}
 	ports, err := parsePorts("UPSTREAM_ALLOW_PORTS", envOr("UPSTREAM_ALLOW_PORTS", defaultUpstreamPorts))
 	if err != nil {
-		return Config{}, err
+		return Config{}, inEveryMode(err)
 	}
 	tunnelPorts, err := parsePorts("TUNNEL_ALLOW_PORTS", envOr("TUNNEL_ALLOW_PORTS", defaultTunnelPorts))
 	if err != nil {
-		return Config{}, err
+		return Config{}, inEveryMode(err)
 	}
 
 	cfg := Config{
@@ -259,6 +259,14 @@ func validate(cfg *Config, routesRaw string) error {
 	if cfg.ShutdownTimeout <= 0 {
 		return fmt.Errorf("SHUTDOWN_TIMEOUT must be > 0, got %s", cfg.ShutdownTimeout)
 	}
+	// Go's http.Server treats zero or negative as "no limit": the slow-header and
+	// keep-alive bounds would vanish silently.
+	if cfg.ReadHeaderTimeout <= 0 {
+		return fmt.Errorf("HTTP_READ_HEADER_TIMEOUT must be > 0, got %s", cfg.ReadHeaderTimeout)
+	}
+	if cfg.IdleTimeout <= 0 {
+		return fmt.Errorf("HTTP_IDLE_TIMEOUT must be > 0, got %s", cfg.IdleTimeout)
+	}
 	if cfg.ReadTimeout < 0 {
 		return fmt.Errorf("HTTP_READ_TIMEOUT must be >= 0, got %s", cfg.ReadTimeout)
 	}
@@ -274,7 +282,7 @@ func validate(cfg *Config, routesRaw string) error {
 		return fmt.Errorf("PROXY_MODE must be header or route, got %q", cfg.ProxyMode)
 	}
 	if cfg.RouteMaxHops < 1 {
-		return fmt.Errorf("ROUTE_MAX_HOPS must be >= 1, got %d", cfg.RouteMaxHops)
+		return inEveryMode(fmt.Errorf("ROUTE_MAX_HOPS must be >= 1, got %d", cfg.RouteMaxHops))
 	}
 	if cfg.ProxyMode == ProxyModeHeader {
 		if routesRaw != "" {
@@ -294,7 +302,7 @@ func validate(cfg *Config, routesRaw string) error {
 	switch cfg.UpstreamScheme {
 	case "http", "https":
 	default:
-		return fmt.Errorf("UPSTREAM_DEFAULT_SCHEME must be http or https, got %q", cfg.UpstreamScheme)
+		return inEveryMode(fmt.Errorf("UPSTREAM_DEFAULT_SCHEME must be http or https, got %q", cfg.UpstreamScheme))
 	}
 	if cfg.ProxyMode == ProxyModeHeader {
 		if cfg.UpstreamScheme == "http" && !cfg.UpstreamAllowHTTP {
@@ -322,6 +330,12 @@ func validate(cfg *Config, routesRaw string) error {
 	return validateMetrics(cfg)
 }
 
+// inEveryMode marks an error from a mode-specific variable: these are parsed in
+// every mode (fail fast), so the error is not a sign the variable matters here.
+func inEveryMode(err error) error {
+	return fmt.Errorf("%w (checked in every PROXY_MODE, even where the variable has no effect)", err)
+}
+
 // Warnings lists non-fatal config notes. main logs them through slog once the JSON
 // handler is installed; emitting them from Load would use the unformatted default logger.
 func (c Config) Warnings() []string {
@@ -338,6 +352,9 @@ func (c Config) Warnings() []string {
 	}
 	if c.ProxyMode == ProxyModeHeader && len(c.AllowHosts) == 0 && len(c.AllowSuffixes) == 0 {
 		w = append(w, "upstream allow-list empty: any host may be targeted unless UPSTREAM_DENY_HOSTS blocks it")
+	}
+	if c.UpstreamAllowPrivate && (c.ProxyMode == ProxyModeHeader || c.TunnelAddr != "") {
+		w = append(w, "UPSTREAM_ALLOW_PRIVATE=true: SSRF guard off, loopback, private and metadata upstreams are reachable")
 	}
 	if c.MetricsAddr == "" && (c.MetricsLocation != "" || len(c.MetricsIngressHosts) > 0) {
 		w = append(w, "METRICS_LOCATION and METRICS_INGRESS_HOSTS have no effect while METRICS_ADDR is empty")
@@ -359,6 +376,9 @@ func validateTunnel(cfg *Config) error {
 	}
 	if cfg.ProxyMode == ProxyModeRoute {
 		return fmt.Errorf("TUNNEL_ADDR is not supported when PROXY_MODE=route")
+	}
+	if sameListenAddr(cfg.TunnelAddr, cfg.HTTPAddr) {
+		return fmt.Errorf("TUNNEL_ADDR %q clashes with HTTP_ADDR %q: one socket per listener", cfg.TunnelAddr, cfg.HTTPAddr)
 	}
 	if !cfg.AuthEnabled && len(cfg.AllowHosts) == 0 && len(cfg.AllowSuffixes) == 0 {
 		return fmt.Errorf("TUNNEL_ADDR without auth requires UPSTREAM_ALLOW_HOSTS or UPSTREAM_ALLOW_SUFFIXES: an open CONNECT relay is refused")

@@ -15,7 +15,7 @@ Nothing is required to start. With no variables the service listens on `:8080` i
 - **Lists** are comma-separated; items are trimmed and lowercased, empty items dropped.
 - **Ports** in port lists are integers from `1` to `65535`.
 - **JSON values** (`ROUTES`, `PROXY_AUTH_HOST_MAP`) go on one line.
-- **Fail fast.** An invalid value or an unsafe combination exits the process at startup with a message naming the variable. Softer problems are logged once as warnings after startup (see [`configuration/listener.md`](configuration/listener.md#log_level)).
+- **Fail fast.** An invalid value or an unsafe combination exits the process at startup with a message naming the variable. Mode-specific variables (`UPSTREAM_ALLOW_PORTS`, `TUNNEL_ALLOW_PORTS`, `UPSTREAM_ALLOW_HTTP`, `UPSTREAM_ALLOW_PRIVATE`, `UPSTREAM_DEFAULT_SCHEME`, `ROUTE_MAX_HOPS`) are checked in every mode, so a typo fails even where the variable has no effect; their errors end with `(checked in every PROXY_MODE, ...)`. Softer problems are logged once as warnings after startup (see [`configuration/listener.md`](configuration/listener.md#log_level)).
 - **No hot reload.** Change a variable, restart the process. The only exception is the tunnel TLS certificate pair.
 
 ## Recipes
@@ -127,6 +127,11 @@ Every variable the code reads. "Mode" says where it has an effect: both, header 
 | `ROUTES` with `PROXY_MODE=header`, or missing in route mode | `ROUTES` belongs to route mode only |
 | `UPSTREAM_DEFAULT_SCHEME=http` without `UPSTREAM_ALLOW_HTTP=true` | header mode refuses a silent downgrade |
 | a host list entry with a port (header mode) | lists hold bare hostnames |
-| `METRICS_ADDR` equal to `HTTP_ADDR` or `TUNNEL_ADDR` | metrics never share a proxy socket |
+| `HTTP_ADDR` and `TUNNEL_ADDR` on one socket | one listener per socket (rule below) |
+| `METRICS_ADDR` on the socket of `HTTP_ADDR` or `TUNNEL_ADDR`, or with port `0` | metrics never share a proxy socket and need a fixed port |
+| `HTTP_READ_HEADER_TIMEOUT` or `HTTP_IDLE_TIMEOUT` of zero or less | the slow-header and keep-alive bounds would vanish |
 
-Warnings only (logged at startup, the process runs): empty allow list in header mode, auth off in header mode, host lists set in route mode (ignored), `UPSTREAM_ALLOW_PRIVATE=true`, a tunnel without TLS, `METRICS_LOCATION` or `METRICS_INGRESS_HOSTS` without `METRICS_ADDR`, `METRICS_INGRESS_HOSTS` in route mode, the removed `AUTH_*` variables, and a route `tls_server_name` that differs from the outgoing `Host`.
+**Socket clash rule.** Two listen addresses clash when the ports are equal and the hosts are equal or either one is a wildcard (empty, `0.0.0.0` or `::`): `:8080`, `0.0.0.0:8080`, `[::]:8080` and `127.0.0.1:8080` all clash with each other, `127.0.0.1:8080` and `127.0.0.2:8080` do not. Hostnames are not resolved, so `localhost:8080` and `127.0.0.1:8080` are not compared; the second bind then fails when listening starts. An unparsable address is left to the listener to reject.
+
+
+Warnings only (logged at startup, the process runs): empty allow list in header mode, auth off in header mode, host lists set in route mode (ignored), `UPSTREAM_ALLOW_PRIVATE=true` (header mode or tunnel), a tunnel without TLS, `METRICS_LOCATION` or `METRICS_INGRESS_HOSTS` without `METRICS_ADDR`, `METRICS_INGRESS_HOSTS` in route mode, the removed `AUTH_*` variables, and a route `tls_server_name` that differs from the outgoing `Host`.

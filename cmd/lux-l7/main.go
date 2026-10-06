@@ -72,10 +72,6 @@ func main() {
 		logger.Warn("auth disabled: do not expose this configuration on the public internet")
 	}
 
-	if cfg.ProxyMode == config.ProxyModeHeader && cfg.UpstreamAllowPrivate {
-		logger.Warn("UPSTREAM_ALLOW_PRIVATE=true: SSRF guard off, loopback, private and metadata upstreams are reachable")
-	}
-
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           front.New(appHandler),

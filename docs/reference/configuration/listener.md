@@ -15,16 +15,16 @@ The main listener speaks plain HTTP/1.x. There is no TLS option on it: end TLS a
 - **Default:** `:8080`.
 - **Change it when:** the port is taken, or you want to bind to loopback only behind a local sidecar.
 - **Example:** `HTTP_ADDR=127.0.0.1:8080`
-- **If wrong:** the value is not checked while loading config. A malformed or busy address makes the process fail when it starts listening. If `METRICS_ADDR` equals it, the metrics address is rejected at startup (see [`metrics.md`](metrics.md)).
+- **If wrong:** the value itself is not checked while loading config: a malformed or busy address makes the process fail when it starts listening. Two listeners on one socket fail startup: `TUNNEL_ADDR` or `METRICS_ADDR` clashing with it is rejected (the clash rule is in [`../configuration.md`](../configuration.md#combinations-that-fail-startup); see also [`tunnel.md`](tunnel.md) and [`metrics.md`](metrics.md)).
 
 ### `HTTP_READ_HEADER_TIMEOUT`
 
 - **What:** how long a client may take to send the request headers. Protects against slow-header connections. The tunnel listener uses the same value for reading the `CONNECT` request.
-- **Values:** Go duration (`5s`, `500ms`).
+- **Values:** Go duration greater than zero (`5s`, `500ms`).
 - **Default:** `5s`.
 - **Change it when:** clients on very slow links legitimately need longer; keep it short on a public endpoint.
 - **Example:** `HTTP_READ_HEADER_TIMEOUT=10s`
-- **If wrong:** an unparsable value fails startup. A zero or negative value is not rejected, and Go's HTTP server then applies no limit, which removes the protection, so do not set it.
+- **If wrong:** zero or negative fails startup (`must be > 0`), because Go's HTTP server would apply no limit and the protection would be gone; unparsable fails startup.
 
 ### `HTTP_READ_TIMEOUT`
 
@@ -47,11 +47,11 @@ The main listener speaks plain HTTP/1.x. There is no TLS option on it: end TLS a
 ### `HTTP_IDLE_TIMEOUT`
 
 - **What:** how long an idle keep-alive client connection stays open between requests, on the main listener.
-- **Values:** Go duration.
+- **Values:** Go duration greater than zero.
 - **Default:** `120s`.
 - **Change it when:** a load balancer in front closes idle connections sooner or later than 120 seconds and you want the proxy to match it.
 - **Example:** `HTTP_IDLE_TIMEOUT=60s`
-- **If wrong:** an unparsable value fails startup. Zero and negative values are not rejected; do not set them.
+- **If wrong:** zero or negative fails startup (`must be > 0`), because the keep-alive time would be unbounded; unparsable fails startup.
 
 ## Shutdown
 

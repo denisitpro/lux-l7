@@ -4,7 +4,7 @@
 
 What a client may reach in header mode, and the limits on upstream calls. Part of the [configuration guide](../configuration.md). The mechanisms behind these variables: [`../capabilities.md`](../capabilities.md#upstream-policy); error codes: [`../protocol.md`](../protocol.md).
 
-In route mode the three host lists are ignored (startup warning), and `UPSTREAM_ALLOW_HTTP`, `UPSTREAM_ALLOW_PRIVATE`, `UPSTREAM_ALLOW_PORTS` and `UPSTREAM_DEFAULT_SCHEME` have no effect; `UPSTREAM_TIMEOUT` and `UPSTREAM_MAX_BYTES` still apply. The ports and boolean variables are nevertheless parsed in every mode, so a typo in them fails startup even in route mode.
+In route mode the three host lists are ignored (startup warning), and `UPSTREAM_ALLOW_HTTP`, `UPSTREAM_ALLOW_PRIVATE`, `UPSTREAM_ALLOW_PORTS` and `UPSTREAM_DEFAULT_SCHEME` have no effect; `UPSTREAM_TIMEOUT` and `UPSTREAM_MAX_BYTES` still apply. The ports and boolean variables, `UPSTREAM_DEFAULT_SCHEME` and `ROUTE_MAX_HOPS` are nevertheless parsed in every mode, so a typo in them fails startup even where they have no effect. This is deliberate (fail fast beats a silently ignored typo), and the error says so: `... (checked in every PROXY_MODE, even where the variable has no effect)`. The same holds for `TUNNEL_ALLOW_PORTS`.
 
 ## Who may be reached
 
@@ -44,7 +44,7 @@ In route mode the three host lists are ignored (startup warning), and `UPSTREAM_
 - **Default:** `false` (guard on).
 - **Change it when:** only for local tests against `127.0.0.1` upstreams. Never in production.
 - **Example:** `UPSTREAM_ALLOW_PRIVATE=true`
-- **If wrong:** an unparsable boolean fails startup. `true` in header mode logs a startup warning. A blocked address at runtime is `403 forbidden`.
+- **If wrong:** an unparsable boolean fails startup. `true` logs a startup warning whenever the guard is off on a listener that uses it: in header mode, or with `TUNNEL_ADDR` set. In route mode without a tunnel it has no effect and no warning. A blocked address at runtime is `403 forbidden`.
 
 ### `UPSTREAM_ALLOW_PORTS`
 

@@ -17,7 +17,7 @@ Metrics are off by default and nothing is recorded while off. `/metrics` is serv
 - **Default:** empty (off).
 - **Change it when:** you run Prometheus.
 - **Example:** `METRICS_ADDR=:9090`
-- **If wrong:** a missing port, a non-numeric port, a value equal to `HTTP_ADDR`, or equal to `TUNNEL_ADDR` fails startup (`METRICS_ADDR: ...`). A busy port fails when listening starts.
+- **If wrong:** a missing port, a non-numeric port, port `0` (Prometheus needs a fixed port to scrape), a value that clashes with `HTTP_ADDR`, or one that clashes with `TUNNEL_ADDR` fails startup (`METRICS_ADDR: ...`; the clash rule is in [`../configuration.md`](../configuration.md#combinations-that-fail-startup)). A busy port fails when listening starts.
 
 ### `METRICS_LOCATION`
 
