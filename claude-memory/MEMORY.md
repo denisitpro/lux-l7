@@ -1,2 +1,3 @@
 - [Short answers](feedback-short-answers.md) — scheme first in a few lines, no walls of text or invented edge cases
 - [Backward-compatible changes](feedback-backward-compatible-changes.md) — no breaking changes; new beside old, deprecate, remove later via an issue
+- [Standard conventions](feedback-standard-conventions.md) — standard knobs (LOG_LEVEL) over invented variables/profiles

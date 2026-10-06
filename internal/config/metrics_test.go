@@ -18,6 +18,8 @@ func TestLoadMetricsSettings(t *testing.T) {
 		{"addr no port", map[string]string{"METRICS_ADDR": "127.0.0.1"}, "METRICS_ADDR"},
 		{"addr bad port", map[string]string{"METRICS_ADDR": ":http"}, "METRICS_ADDR"},
 		{"addr equals http", map[string]string{"METRICS_ADDR": ":8080"}, "must differ from HTTP_ADDR"},
+		{"addr equals http, other spelling", map[string]string{"METRICS_ADDR": "0.0.0.0:8080"}, "must differ from HTTP_ADDR"},
+		{"addr port zero", map[string]string{"METRICS_ADDR": "127.0.0.1:0"}, "port 0 is not allowed"},
 		{"addr equals tunnel", map[string]string{"METRICS_ADDR": ":8443", "TUNNEL_ADDR": ":8443", "UPSTREAM_ALLOW_HOSTS": "example.com"}, "must differ from TUNNEL_ADDR"},
 		{"location ok", map[string]string{"METRICS_LOCATION": "eu-1"}, ""},
 		{"location with space", map[string]string{"METRICS_LOCATION": "eu 1"}, "METRICS_LOCATION"},

@@ -23,7 +23,7 @@ In route mode clients send ordinary requests. The proxy takes the request `Host`
 - **Default:** `1`: a request that already went through one route hop is refused.
 - **Change it when:** you deliberately chain route-mode instances; set it to the number of hops you allow.
 - **Example:** `ROUTE_MAX_HOPS=2`
-- **If wrong:** below 1 or not an integer fails startup. The value is parsed in every mode, so a bad value fails startup even in header mode, where it has no effect.
+- **If wrong:** below 1 or not an integer fails startup. The value is parsed in every mode, so a bad value fails startup even in header mode, where it has no effect; the error says it is checked in every `PROXY_MODE`.
 
 ## Route fields
 
