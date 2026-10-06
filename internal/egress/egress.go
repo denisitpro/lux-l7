@@ -39,6 +39,9 @@ var blockedPrefixes = mustPrefixes(
 var (
 	nat64Prefix = netip.MustParsePrefix("64:ff9b::/96")
 	sixToFour   = netip.MustParsePrefix("2002::/16")
+	// Deprecated IPv4-compatible IPv6 (RFC 4291); `::` and `::1` fall in it too and
+	// stay blocked because their embedded IPv4 is in 0.0.0.0/8.
+	v4Compatible = netip.MustParsePrefix("::/96")
 )
 
 func mustPrefixes(cidrs ...string) []netip.Prefix {
@@ -50,7 +53,7 @@ func mustPrefixes(cidrs ...string) []netip.Prefix {
 }
 
 // Blocked reports whether ip is not a public unicast address. IPv4-mapped IPv6 is
-// checked as IPv4; NAT64 and 6to4 addresses are checked by their embedded IPv4.
+// checked as IPv4; NAT64, 6to4 and IPv4-compatible (`::/96`) addresses are checked by their embedded IPv4.
 func Blocked(ip netip.Addr) bool {
 	ip = ip.WithZone("").Unmap()
 	if !ip.IsValid() {
@@ -63,6 +66,8 @@ func Blocked(ip netip.Addr) bool {
 			return Blocked(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}))
 		case sixToFour.Contains(ip):
 			return Blocked(netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}))
+		case v4Compatible.Contains(ip):
+			return Blocked(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}))
 		}
 	}
 	for _, p := range blockedPrefixes {

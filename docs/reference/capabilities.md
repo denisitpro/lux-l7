@@ -51,7 +51,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 ### SSRF guard
 
-- **What:** the resolved IP is checked at dial time (`net.Dialer.Control`), so a name that resolves or rebinds to an internal address is refused as a literal one would be. Blocked: unspecified and `0.0.0.0/8`, loopback, RFC 1918, CGNAT, link-local (including the metadata address), `192.0.0.0/24`, benchmarking, reserved `240.0.0.0/4`, multicast, IPv6 unique-local, link-local and local-use NAT64 `64:ff9b:1::/48`. IPv4-mapped IPv6 is checked as IPv4; `64:ff9b::/96` (NAT64) and `2002::/16` (6to4) are judged by the embedded IPv4. A blocked dial is `403 forbidden` "upstream address not allowed".
+- **What:** the resolved IP is checked at dial time (`net.Dialer.Control`), so a name that resolves or rebinds to an internal address is refused as a literal one would be. Blocked: unspecified and `0.0.0.0/8`, loopback, RFC 1918, CGNAT, link-local (including the metadata address), `192.0.0.0/24`, benchmarking, reserved `240.0.0.0/4`, multicast, IPv6 unique-local, link-local and local-use NAT64 `64:ff9b:1::/48`. IPv4-mapped IPv6 is checked as IPv4; `64:ff9b::/96` (NAT64), `2002::/16` (6to4) and the deprecated IPv4-compatible `::/96` are judged by the embedded IPv4 ([#60](https://github.com/denisitpro/lux-l7/issues/60)). A blocked dial is `403 forbidden` "upstream address not allowed".
 - **Enable:** always on in header mode and the tunnel. `UPSTREAM_ALLOW_PRIVATE=true` turns it off (startup warning; local tests only).
 - **Limits:** not applied in route mode. The header-mode transport ignores `HTTP_PROXY` so the guard sees the real target.
 - **Origin:** [#31](https://github.com/denisitpro/lux-l7/pull/31) (issue [#3](https://github.com/denisitpro/lux-l7/issues/3)).
