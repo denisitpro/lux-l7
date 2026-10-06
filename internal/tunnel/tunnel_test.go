@@ -335,6 +335,18 @@ func TestAuthRequired(t *testing.T) {
 	expectStatus(t, addr, target, basic("", testToken), http.StatusOK)
 }
 
+func TestAuthMultipleInstanceTokens(t *testing.T) {
+	_, port := tcpServer(t, echo)
+	target := "127.0.0.1:" + strconv.Itoa(port)
+	cfg := withAuth(baseCfg(port))
+	cfg.InstanceToken = testToken + ", second-token ,,"
+	addr, _ := start(t, cfg)
+
+	expectStatus(t, addr, target, basic("u", testToken), http.StatusOK)
+	expectStatus(t, addr, target, basic("u", "second-token"), http.StatusOK)
+	expectStatus(t, addr, target, basic("u", "third-token"), http.StatusProxyAuthRequired)
+}
+
 func TestAuthPerHostToken(t *testing.T) {
 	_, port := tcpServer(t, echo)
 	cfg := baseCfg(port)
