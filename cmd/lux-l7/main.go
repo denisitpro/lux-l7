@@ -13,6 +13,7 @@ import (
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/front"
+	"github.com/denisitpro/lux-l7/internal/metrics"
 	"github.com/denisitpro/lux-l7/internal/proxy"
 	"github.com/denisitpro/lux-l7/internal/relay"
 	"github.com/denisitpro/lux-l7/internal/tunnel"
@@ -35,12 +36,25 @@ func main() {
 
 	logger.Info("starting", "version", version.Build, "commit", version.Commit, "ref", version.Ref, "built_at", version.BuiltAt)
 
+	// Metrics are wired only when METRICS_ADDR is set; otherwise nothing is recorded.
+	var m *metrics.Metrics
+	var metricsSrv *metrics.Server
+	if cfg.MetricsAddr != "" {
+		reg := metrics.NewRegistry()
+		m = metrics.New(reg, metrics.Options{Location: cfg.MetricsLocation, IngressHosts: cfg.MetricsIngressHosts})
+		metricsSrv, err = metrics.Start(logger, cfg.MetricsAddr, reg)
+		if err != nil {
+			logger.Error("metrics", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	var appHandler http.Handler
 	var authValidator *auth.Validator
 	switch cfg.ProxyMode {
 	case config.ProxyModeRoute:
 		logger.Info("proxy mode", "mode", "route", "routes", len(cfg.Routes))
-		appHandler = relay.New(cfg, cfg.Routes, logger, relay.Options{})
+		appHandler = relay.New(cfg, cfg.Routes, logger, relay.Options{Metrics: m})
 	default:
 		logger.Info("proxy mode", "mode", "header")
 		authValidator, err = auth.New(cfg)
@@ -51,7 +65,7 @@ func main() {
 		if cfg.AuthEnabled && cfg.AuthMode == config.AuthModeInstance {
 			logger.Info("auth", "mode", "instance", "tokens", authValidator.InstanceTokenCount())
 		}
-		appHandler = proxy.New(cfg, authValidator, logger)
+		appHandler = proxy.New(cfg, authValidator, logger, proxy.WithMetrics(m))
 	}
 
 	if cfg.ProxyMode == config.ProxyModeHeader && !cfg.AuthEnabled {
@@ -81,7 +95,7 @@ func main() {
 
 	var tun *tunnel.Server
 	if cfg.TunnelAddr != "" {
-		tun, err = tunnel.New(cfg, authValidator, logger)
+		tun, err = tunnel.New(cfg, authValidator, logger, tunnel.WithMetrics(m))
 		if err != nil {
 			logger.Error("tunnel", "err", err)
 			os.Exit(1)
@@ -120,6 +134,10 @@ func main() {
 	if tun != nil {
 		wg.Add(1)
 		go shutdown("tunnel", tun.Shutdown)
+	}
+	if metricsSrv != nil {
+		wg.Add(1)
+		go shutdown("metrics", metricsSrv.Shutdown)
 	}
 	wg.Wait()
 	if failed {

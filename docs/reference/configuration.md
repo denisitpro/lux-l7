@@ -83,6 +83,16 @@ With both allow lists empty every host is admitted (header mode logs a warning).
 ]
 ```
 
+### Metrics
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `METRICS_ADDR` | empty (off) | Full bind address for `/metrics`, port required (`:9090`, `127.0.0.1:9090`). Must differ from `HTTP_ADDR` and `TUNNEL_ADDR`. Never publish it. |
+| `METRICS_LOCATION` | empty | Constant `location` label on every `lux_l7_` series, e.g. `eu-1`: 1-32 characters of letters, digits, `.`, `_`, `-`, starting with a letter or digit. Empty: no label (set it as a Prometheus target label instead). |
+| `METRICS_INGRESS_HOSTS` | empty | Header mode: front hosts allowed as `ingress_host` label values (bare hostnames, no port); any other `Host` is `other`. Ignored in route mode (labels come from `ROUTES`). |
+
+`METRICS_LOCATION` and `METRICS_INGRESS_HOSTS` without `METRICS_ADDR` log a startup warning. Series and the cardinality bound: [`capabilities.md`](capabilities.md#prometheus-metrics).
+
 ### Tunnel
 
 | Variable | Default | Meaning |
@@ -98,4 +108,4 @@ Generate each token with `openssl rand -hex 32` (64 hex characters). A token can
 
 ## Startup errors
 
-The process exits at startup, never degrades silently, on: an unparsable boolean, duration, integer or port; a duration or byte limit that must be > 0 and is not; unknown `PROXY_MODE`, `UPSTREAM_DEFAULT_SCHEME`, or `LOG_LEVEL`; `ROUTES` set in header mode or missing or invalid in route mode; both token variables set; a token variable in route mode; `TUNNEL_ADDR` in route mode; an open tunnel (no auth and no allow list); one TLS file without the other or an unreadable pair; policy entries with a port.
+The process exits at startup, never degrades silently, on: an unparsable boolean, duration, integer or port; a duration or byte limit that must be > 0 and is not; unknown `PROXY_MODE`, `UPSTREAM_DEFAULT_SCHEME`, or `LOG_LEVEL`; `ROUTES` set in header mode or missing or invalid in route mode; both token variables set; a token variable in route mode; `TUNNEL_ADDR` in route mode; an open tunnel (no auth and no allow list); one TLS file without the other or an unreadable pair; policy entries with a port; an invalid `METRICS_ADDR` (no port, equal to `HTTP_ADDR` or `TUNNEL_ADDR`), `METRICS_LOCATION` or `METRICS_INGRESS_HOSTS` entry.

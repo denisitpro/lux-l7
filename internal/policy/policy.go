@@ -92,15 +92,38 @@ func (p *Policy) Allowed(authority string) bool {
 	if len(p.allowHosts) == 0 && len(p.allowSuffixes) == 0 {
 		return true
 	}
-	if _, ok := p.allowHosts[host]; ok {
-		return true
+	_, ok := p.matchAllow(host)
+	return ok
+}
+
+// AllowEntry returns the allow-list entry that admits authority: the exact host, or
+// the suffix entry as configured (with its leading dot). It is empty when both allow
+// lists are empty or nothing matches. Deny lists are not consulted: this names a
+// bounded metrics label, it never decides access.
+func (p *Policy) AllowEntry(authority string) string {
+	if p == nil {
+		return ""
+	}
+	host := hostname(authority)
+	if host == "" {
+		return ""
+	}
+	entry, _ := p.matchAllow(host)
+	return entry
+}
+
+// matchAllow finds the allow entry for a normalized host: exact hosts first, then
+// suffixes in configured order.
+func (p *Policy) matchAllow(host string) (entry string, ok bool) {
+	if _, exact := p.allowHosts[host]; exact {
+		return host, true
 	}
 	for _, suf := range p.allowSuffixes {
 		if host == strings.TrimPrefix(suf, ".") || strings.HasSuffix(host, suf) {
-			return true
+			return suf, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func hostname(authority string) string {

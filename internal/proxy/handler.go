@@ -16,6 +16,7 @@ import (
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/egress"
 	"github.com/denisitpro/lux-l7/internal/headers"
+	"github.com/denisitpro/lux-l7/internal/metrics"
 	"github.com/denisitpro/lux-l7/internal/policy"
 )
 
@@ -36,10 +37,20 @@ type Handler struct {
 	proxy  *httputil.ReverseProxy
 	ports  map[int]struct{} // empty: no port restriction (config.Load always sets a default)
 	log    *slog.Logger
+
+	metrics *metrics.Metrics // nil: records nothing
+}
+
+// Option customizes New.
+type Option func(*Handler)
+
+// WithMetrics makes the handler record request series on m.
+func WithMetrics(m *metrics.Metrics) Option {
+	return func(h *Handler) { h.metrics = m }
 }
 
 // New builds the L7 proxy handler.
-func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
+func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -64,6 +75,9 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
 		ports:  make(map[int]struct{}, len(cfg.UpstreamAllowPorts)),
 		log:    log,
 	}
+	for _, o := range opts {
+		o(h)
+	}
 	for _, port := range cfg.UpstreamAllowPorts {
 		h.ports[port] = struct{}{}
 	}
@@ -71,6 +85,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
 		Transport: tr,
 		Rewrite:   h.rewrite,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			ObserveUpstreamError(metrics.From(w), err)
 			WriteUpstreamError(w, h.log, err, "path", r.URL.Path)
 		},
 	}
@@ -78,29 +93,39 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) *Handler {
 	return h
 }
 
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	w, obs := h.metrics.Begin(metrics.ModeHeader, rw)
+	defer obs.Done()
+	obs.Ingress(r.Host)
 	t, err := parseTarget(r, h.cfg.UpstreamScheme, h.cfg.UpstreamAllowHTTP)
 	if err != nil {
+		obs.Reject(metrics.RejectBadTarget)
 		WriteJSON(w, http.StatusBadRequest, "bad_target", err.Error())
 		return
 	}
+	obs.Upstream(h.policy, t.host)
 	// Token first: an unauthenticated client must not learn the allow list or port list
 	// from 403 versus 401.
 	token := r.Header.Get(headers.ProxyToken)
 	if !h.auth.Authorize(token, t.host) {
+		obs.Reject(metrics.RejectUnauthorized)
 		WriteJSON(w, http.StatusUnauthorized, "unauthorized", "missing or invalid proxy token")
 		return
 	}
 	if !h.policy.Allowed(t.host) {
+		obs.Reject(metrics.RejectForbiddenHost)
 		WriteJSON(w, http.StatusForbidden, "forbidden", "upstream host not allowed")
 		return
 	}
 	if !h.portAllowed(t) {
+		obs.Reject(metrics.RejectForbiddenPort)
 		WriteJSON(w, http.StatusForbidden, "forbidden", "upstream port not allowed")
 		return
 	}
 
-	if err := LimitBody(w, r, h.cfg.UpstreamMaxBytes); err != nil {
+	// rw, not w: MaxBytesReader needs the server's own writer to close the connection.
+	if err := LimitBody(rw, r, h.cfg.UpstreamMaxBytes); err != nil {
+		obs.Reject(metrics.RejectBodyTooLarge)
 		WriteJSON(w, http.StatusRequestEntityTooLarge, "body_too_large", err.Error())
 		return
 	}

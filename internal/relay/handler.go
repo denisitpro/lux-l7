@@ -13,6 +13,7 @@ import (
 
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/headers"
+	"github.com/denisitpro/lux-l7/internal/metrics"
 	"github.com/denisitpro/lux-l7/internal/proxy"
 	"github.com/denisitpro/lux-l7/internal/route"
 )
@@ -22,6 +23,8 @@ const statusLoopDetected = 508
 // Options configures relay construction (tests may inject RootCAs).
 type Options struct {
 	RootCAs *x509.CertPool
+	// Metrics records request series; nil records nothing.
+	Metrics *metrics.Metrics
 }
 
 // Handler forwards requests using a static route table.
@@ -31,6 +34,7 @@ type Handler struct {
 	proxies []*httputil.ReverseProxy
 	maxHops int
 	log     *slog.Logger
+	metrics *metrics.Metrics
 }
 
 // New builds the route-mode handler.
@@ -43,6 +47,7 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 		routes:  routes,
 		maxHops: cfg.RouteMaxHops,
 		log:     log,
+		metrics: opts.Metrics,
 	}
 	h.proxies = make([]*httputil.ReverseProxy, len(routes))
 	for i, rt := range routes {
@@ -56,6 +61,7 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				// Minimal logging (#24): no client or request data. Transport errors name
 				// the dial address and the failure, never the request path or query.
+				proxy.ObserveUpstreamError(metrics.From(w), err)
 				proxy.WriteUpstreamError(w, h.log, err, "route", idx, "upstream", rt.Upstream.String())
 			},
 		}
@@ -63,29 +69,39 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 	return h
 }
 
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	w, obs := h.metrics.Begin(metrics.ModeRoute, rw)
+	defer obs.Done()
 	if r.Method == http.MethodConnect {
 		// CONNECT tunnels are a separate mode (#23); never relay them as plain requests.
+		obs.Reject(metrics.RejectMethodNotAllowed)
 		proxy.WriteJSON(w, http.StatusMethodNotAllowed, "method_not_allowed", "CONNECT is not supported in route mode")
 		return
 	}
 	idx := route.Match(h.routes, r.Host, r.URL.Path)
 	if idx < 0 {
+		obs.Reject(metrics.RejectNoRoute)
 		proxy.WriteJSON(w, http.StatusNotFound, "no_route", "no matching route")
 		return
 	}
 
+	obs.Route(h.routes[idx].Host, h.routes[idx].Upstream.Hostname())
+
 	inHops, err := parseHops(r.Header.Get(headers.Hops))
 	if err != nil {
+		obs.Reject(metrics.RejectBadHops)
 		proxy.WriteJSON(w, http.StatusBadRequest, "bad_hops", err.Error())
 		return
 	}
 	if inHops >= h.maxHops {
+		obs.Reject(metrics.RejectLoopDetected)
 		proxy.WriteJSON(w, statusLoopDetected, "loop_detected", "hop limit exceeded")
 		return
 	}
 
-	if err := proxy.LimitBody(w, r, h.cfg.UpstreamMaxBytes); err != nil {
+	// rw, not w: MaxBytesReader needs the server's own writer to close the connection.
+	if err := proxy.LimitBody(rw, r, h.cfg.UpstreamMaxBytes); err != nil {
+		obs.Reject(metrics.RejectBodyTooLarge)
 		proxy.WriteJSON(w, http.StatusRequestEntityTooLarge, "body_too_large", err.Error())
 		return
 	}

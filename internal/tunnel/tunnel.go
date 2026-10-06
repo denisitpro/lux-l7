@@ -22,6 +22,7 @@ import (
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/egress"
+	"github.com/denisitpro/lux-l7/internal/metrics"
 	"github.com/denisitpro/lux-l7/internal/policy"
 	"github.com/denisitpro/lux-l7/internal/proxy"
 )
@@ -42,6 +43,8 @@ type Server struct {
 	idle   time.Duration
 	log    *slog.Logger
 
+	metrics *metrics.Metrics // nil: records nothing
+
 	srv    *http.Server
 	tlsCfg *tls.Config // nil: plain listener
 
@@ -51,9 +54,17 @@ type Server struct {
 	wg      sync.WaitGroup
 }
 
+// Option customizes New.
+type Option func(*Server)
+
+// WithMetrics makes the server record request series on m.
+func WithMetrics(m *metrics.Metrics) Option {
+	return func(s *Server) { s.metrics = m }
+}
+
 // New builds the tunnel server. It loads the TLS pair when configured, so a bad
 // certificate fails startup.
-func New(cfg config.Config, v *auth.Validator, log *slog.Logger) (*Server, error) {
+func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option) (*Server, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -65,6 +76,9 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger) (*Server, error
 		idle:   cfg.TunnelIdleTimeout,
 		log:    log,
 		conns:  make(map[net.Conn]struct{}),
+	}
+	for _, o := range opts {
+		o(s)
 	}
 	for _, p := range cfg.TunnelAllowPorts {
 		s.ports[p] = struct{}{}
@@ -152,45 +166,57 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The client names only the target, so there is no ingress host: the label stays "other".
+	w, obs := s.metrics.Begin(metrics.ModeTunnel, w)
+	defer obs.Done()
 	if r.Method != http.MethodConnect {
+		obs.Reject(metrics.RejectMethodNotAllowed)
 		w.Header().Set("Allow", http.MethodConnect)
 		proxy.WriteJSON(w, http.StatusMethodNotAllowed, "method_not_allowed", "only CONNECT is supported on the tunnel listener")
 		return
 	}
 	host, port, err := policy.SplitAuthority(r.Host)
 	if err != nil || port == "" {
+		obs.Reject(metrics.RejectBadTarget)
 		proxy.WriteJSON(w, http.StatusBadRequest, "bad_target", "CONNECT target must be host:port")
 		return
 	}
 	authority := net.JoinHostPort(host, port)
+	obs.Upstream(s.policy, authority)
 	// Credentials first: an unauthenticated client must not learn the allow list or
 	// port list from 403 versus 407.
 	if !s.auth.Authorize(proxyToken(r.Header), authority) {
+		obs.Reject(metrics.RejectProxyAuth)
 		w.Header().Set("Proxy-Authenticate", proxyRealm)
 		proxy.WriteJSON(w, http.StatusProxyAuthRequired, "proxy_auth_required", "missing or invalid proxy credentials")
 		return
 	}
 	if !s.policy.Allowed(authority) {
+		obs.Reject(metrics.RejectForbiddenHost)
 		proxy.WriteJSON(w, http.StatusForbidden, "forbidden", "upstream host not allowed")
 		return
 	}
 	if n, _ := strconv.Atoi(port); !s.portAllowed(n) { // SplitAuthority validated the port
+		obs.Reject(metrics.RejectForbiddenPort)
 		proxy.WriteJSON(w, http.StatusForbidden, "forbidden", "upstream port not allowed")
 		return
 	}
 	if s.isClosing() {
+		obs.Reject(metrics.RejectShuttingDown)
 		proxy.WriteJSON(w, http.StatusServiceUnavailable, "shutting_down", "proxy is shutting down")
 		return
 	}
 
 	up, err := s.dialer.DialContext(r.Context(), "tcp", authority)
 	if err != nil {
+		proxy.ObserveUpstreamError(obs, err)
 		proxy.WriteUpstreamError(w, s.log, err)
 		return
 	}
 	client, bufrw, err := http.NewResponseController(w).Hijack()
 	if err != nil {
 		_ = up.Close()
+		obs.Reject(metrics.RejectInternal)
 		s.log.Error("tunnel hijack", "err", err)
 		proxy.WriteJSON(w, http.StatusInternalServerError, "internal", "connection cannot be tunneled")
 		return
@@ -204,12 +230,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.track(client, up) {
+		obs.Reject(metrics.RejectShuttingDown)
+		obs.SetStatus(http.StatusServiceUnavailable)
 		_, _ = client.Write([]byte("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"))
 		_ = client.Close()
 		_ = up.Close()
 		return
 	}
 	defer s.untrack(client, up)
+	obs.TunnelOpen()
 	defer func() { _ = client.Close() }()
 	defer func() { _ = up.Close() }()
 

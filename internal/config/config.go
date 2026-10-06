@@ -100,6 +100,13 @@ type Config struct {
 	// TunnelTLSCertFile and TunnelTLSKeyFile enable TLS on the tunnel listener (both or neither).
 	TunnelTLSCertFile string
 	TunnelTLSKeyFile  string
+
+	// MetricsAddr is the Prometheus listener (full bind address); empty disables metrics.
+	MetricsAddr string
+	// MetricsLocation is a constant `location` label on every series; empty adds none.
+	MetricsLocation string
+	// MetricsIngressHosts are the front hosts header mode may label; others are "other".
+	MetricsIngressHosts []string
 }
 
 // Load reads configuration from the environment after optionally loading test.env.
@@ -162,6 +169,9 @@ func Load() (Config, error) {
 		TunnelIdleTimeout:    defaultTunnelIdleTimeout,
 		TunnelTLSCertFile:    strings.TrimSpace(os.Getenv("TUNNEL_TLS_CERT_FILE")),
 		TunnelTLSKeyFile:     strings.TrimSpace(os.Getenv("TUNNEL_TLS_KEY_FILE")),
+		MetricsAddr:          strings.TrimSpace(os.Getenv("METRICS_ADDR")),
+		MetricsLocation:      strings.TrimSpace(os.Getenv("METRICS_LOCATION")),
+		MetricsIngressHosts:  splitCSV(os.Getenv("METRICS_INGRESS_HOSTS")),
 	}
 
 	level, err := parseLevel(envOr("LOG_LEVEL", defaultLogLevel))
@@ -309,7 +319,7 @@ func validate(cfg *Config, routesRaw string) error {
 	if err := validateTunnel(cfg); err != nil {
 		return err
 	}
-	return nil
+	return validateMetrics(cfg)
 }
 
 // Warnings lists non-fatal config notes. main logs them through slog once the JSON
@@ -328,6 +338,12 @@ func (c Config) Warnings() []string {
 	}
 	if c.ProxyMode == ProxyModeHeader && len(c.AllowHosts) == 0 && len(c.AllowSuffixes) == 0 {
 		w = append(w, "upstream allow-list empty: any host may be targeted unless UPSTREAM_DENY_HOSTS blocks it")
+	}
+	if c.MetricsAddr == "" && (c.MetricsLocation != "" || len(c.MetricsIngressHosts) > 0) {
+		w = append(w, "METRICS_LOCATION and METRICS_INGRESS_HOSTS have no effect while METRICS_ADDR is empty")
+	}
+	if c.ProxyMode == ProxyModeRoute && len(c.MetricsIngressHosts) > 0 {
+		w = append(w, "METRICS_INGRESS_HOSTS is ignored in route mode: ingress_host comes from ROUTES")
 	}
 	return w
 }
