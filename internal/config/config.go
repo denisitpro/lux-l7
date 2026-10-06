@@ -85,6 +85,10 @@ type Config struct {
 	InstanceToken string
 	HostTokenJSON string
 
+	// LegacyAuthVars names AUTH_ENABLED / AUTH_MODE when set: both are inferred from the
+	// tokens and only checked for contradictions, so Warnings asks to remove them.
+	LegacyAuthVars []string
+
 	// TunnelAddr is the CONNECT tunnel listen address; empty disables the tunnel.
 	TunnelAddr string
 	// TunnelAllowPorts lists the target ports a CONNECT client may reach.
@@ -113,7 +117,7 @@ func Load() (Config, error) {
 		routeMaxHops = n
 	}
 
-	authEnabled, err := envBool("AUTH_ENABLED", false)
+	authEnabled, authEnabledSet, err := envBoolOpt("AUTH_ENABLED")
 	if err != nil {
 		return Config{}, err
 	}
@@ -152,7 +156,6 @@ func Load() (Config, error) {
 		UpstreamAllowHTTP:    allowHTTP,
 		UpstreamAllowPrivate: allowPrivate,
 		UpstreamAllowPorts:   ports,
-		AuthEnabled:          authEnabled,
 		AuthMode:             AuthMode(envOr("AUTH_MODE", string(AuthModeInstance))),
 		InstanceToken:        strings.TrimSpace(os.Getenv("PROXY_AUTH_TOKEN")),
 		HostTokenJSON:        strings.TrimSpace(os.Getenv("PROXY_AUTH_HOST_MAP")),
@@ -171,6 +174,16 @@ func Load() (Config, error) {
 
 	if err := fillDurations(&cfg); err != nil {
 		return Config{}, err
+	}
+	authEnv := authEnv{enabledSet: authEnabledSet, enabled: authEnabled, modeSet: strings.TrimSpace(os.Getenv("AUTH_MODE")) != ""}
+	if err := resolveAuth(&cfg, authEnv); err != nil {
+		return Config{}, err
+	}
+	if authEnv.enabledSet {
+		cfg.LegacyAuthVars = append(cfg.LegacyAuthVars, "AUTH_ENABLED")
+	}
+	if authEnv.modeSet {
+		cfg.LegacyAuthVars = append(cfg.LegacyAuthVars, "AUTH_MODE")
 	}
 	if err := validate(&cfg, routesRaw); err != nil {
 		return Config{}, err
@@ -291,30 +304,26 @@ func validate(cfg *Config, routesRaw string) error {
 			}
 		}
 	}
-	switch cfg.AuthMode {
-	case AuthModeInstance, AuthModePerHost:
-	default:
-		return fmt.Errorf("AUTH_MODE must be instance or per_host, got %q", cfg.AuthMode)
-	}
-	if cfg.ProxyMode == ProxyModeRoute && cfg.AuthEnabled {
-		return fmt.Errorf("auth is not supported in route mode: unset AUTH_ENABLED")
-	}
-	if cfg.AuthEnabled && cfg.AuthMode == AuthModeInstance && cfg.InstanceToken == "" {
-		return fmt.Errorf("AUTH_ENABLED with AUTH_MODE=instance requires PROXY_AUTH_TOKEN")
-	}
-	if cfg.AuthEnabled && cfg.AuthMode == AuthModePerHost && cfg.HostTokenJSON == "" {
-		return fmt.Errorf("AUTH_ENABLED with AUTH_MODE=per_host requires PROXY_AUTH_HOST_MAP")
-	}
 	if err := validateTunnel(cfg); err != nil {
 		return err
 	}
-	if cfg.ProxyMode == ProxyModeRoute && (len(cfg.AllowHosts) > 0 || len(cfg.AllowSuffixes) > 0 || len(cfg.DenyHosts) > 0) {
-		slog.Default().Warn("UPSTREAM_ALLOW_HOSTS, UPSTREAM_ALLOW_SUFFIXES and UPSTREAM_DENY_HOSTS are ignored in route mode")
-	}
-	if cfg.ProxyMode == ProxyModeHeader && len(cfg.AllowHosts) == 0 && len(cfg.AllowSuffixes) == 0 {
-		slog.Default().Warn("upstream allow-list empty: any host may be targeted unless UPSTREAM_DENY_HOSTS blocks it")
-	}
 	return nil
+}
+
+// Warnings lists non-fatal config notes. main logs them through slog once the JSON
+// handler is installed; emitting them from Load would use the unformatted default logger.
+func (c Config) Warnings() []string {
+	var w []string
+	if len(c.LegacyAuthVars) > 0 {
+		w = append(w, strings.Join(c.LegacyAuthVars, " and ")+" set: legacy, auth follows PROXY_AUTH_TOKEN / PROXY_AUTH_HOST_MAP; the variable can be removed")
+	}
+	if c.ProxyMode == ProxyModeRoute && (len(c.AllowHosts) > 0 || len(c.AllowSuffixes) > 0 || len(c.DenyHosts) > 0) {
+		w = append(w, "UPSTREAM_ALLOW_HOSTS, UPSTREAM_ALLOW_SUFFIXES and UPSTREAM_DENY_HOSTS are ignored in route mode")
+	}
+	if c.ProxyMode == ProxyModeHeader && len(c.AllowHosts) == 0 && len(c.AllowSuffixes) == 0 {
+		w = append(w, "upstream allow-list empty: any host may be targeted unless UPSTREAM_DENY_HOSTS blocks it")
+	}
+	return w
 }
 
 // validateTunnel rejects tunnel settings that would expose an open CONNECT relay or
@@ -343,7 +352,7 @@ func envOr(key, fallback string) string {
 }
 
 // envBool fails on an unparsable value: silently falling back would turn a typo
-// such as AUTH_ENABLED=yes into "auth off".
+// such as UPSTREAM_ALLOW_PRIVATE=yes into "guard on".
 func envBool(key string, fallback bool) (bool, error) {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {

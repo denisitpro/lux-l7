@@ -10,17 +10,16 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 - `GET /healthz`, `GET /readyz`, `GET /version` (unauthenticated, never proxied; JSON `{"version":"<build>"}`). The version is also logged once at startup (`starting`).
 - L7 reverse proxy: `X-L7-Target-Host`, optional `X-L7-Target-Scheme` (default from `UPSTREAM_DEFAULT_SCHEME`).
 - Upstream allow/deny via `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES`, `UPSTREAM_DENY_HOSTS`.
-- Auth optional (`AUTH_ENABLED=false` by default): `X-L7-Proxy-Token`, modes `instance` / `per_host`.
-- Instance mode takes several tokens: `PROXY_AUTH_TOKEN=tok-a,tok-b,tok-c` (comma-separated, whitespace around items trimmed, empty items and duplicates dropped; a token cannot contain a comma). A request passes if its token matches any one entry; this holds for header mode and the CONNECT tunnel. Give each client its own token and revoke one by removing it and redeploying. Only SHA-256 hashes are kept; the presented token is hashed once and compared in constant time against every stored hash with no early exit. No valid token with auth on is a startup error; the token count (never the values) is logged at startup. `per_host` is unchanged.
+- Auth optional, off by default, turned on by the tokens alone ([#36](https://github.com/denisitpro/lux-l7/issues/36)): `PROXY_AUTH_TOKEN` set means `instance` mode, `PROXY_AUTH_HOST_MAP` set means `per_host` mode, both set is a startup error. Clients send `X-L7-Proxy-Token`.
+- Instance mode takes several tokens: `PROXY_AUTH_TOKEN=tok-a,tok-b,tok-c` (comma-separated, whitespace around items trimmed, empty items and duplicates dropped; a token cannot contain a comma). A request passes if its token matches any one entry; this holds for header mode and the CONNECT tunnel. Give each client its own token and revoke one by removing it and redeploying. Only SHA-256 hashes are kept; the presented token is hashed once and compared in constant time against every stored hash with no early exit. The token count (never the values) is logged at startup. `per_host` is unchanged.
   - Generate tokens with `openssl rand -hex 32` (64 hex chars).
   - Capacity: one env var value is capped by the kernel (Linux `MAX_ARG_STRLEN` = 128 KiB per env string) and a Kubernetes Secret by 1 MiB. With 64-char tokens plus a comma that is about 2000 tokens. Cost per request is one SHA-256 plus N 32-byte compares, negligible at that size.
 - Routing headers stripped before the upstream request; in header mode a client `X-L7-Hops` is stripped too.
 - Target validation (header mode, `400 bad_target`): no userinfo (`@`), non-empty host, numeric port `1..65535`. One trailing dot in the host is dropped (`localhost.` is `localhost`) before policy, auth and dial.
 - Plain-http upstreams are off by default: `X-L7-Target-Scheme: http` is `400 bad_target` unless `UPSTREAM_ALLOW_HTTP=true`; `UPSTREAM_DEFAULT_SCHEME=http` without it fails at startup.
-- Startup config errors: unparsable booleans (`AUTH_ENABLED=yes`), `UPSTREAM_MAX_BYTES`/`UPSTREAM_TIMEOUT`/`SHUTDOWN_TIMEOUT` <= 0, and port-bearing entries in the allow/deny lists (policy compares bare hostnames).
+- Startup config errors: unparsable booleans (`UPSTREAM_ALLOW_HTTP=yes`), `UPSTREAM_MAX_BYTES`/`UPSTREAM_TIMEOUT`/`SHUTDOWN_TIMEOUT` <= 0, and port-bearing entries in the allow/deny lists (policy compares bare hostnames).
 - Upstream failures: timeout `504` / `upstream_timeout`, other dial or transport errors `502` / `bad_gateway`; a client cancel gets no response and is logged at debug (both modes).
 - Request paths are passed verbatim (`//a//b`, `/a/../b` are not cleaned or redirected); only `GET /healthz`, `/readyz`, `/version` are served locally.
-- Auth **disabled by default** for local and integration tests.
 - Single static binary, container image (`Dockerfile`), CI (`.github/workflows/ci.yml`: `go test -race`) and image release (`docker-release.yml`), Dependabot.
 - SSRF guard (header mode, [#3](https://github.com/denisitpro/lux-l7/issues/3)): the resolved IP is checked at dial time (`internal/egress`, `net.Dialer.Control`), so names resolving or rebinding to internal addresses are refused. Blocked: unspecified, `0.0.0.0/8`, loopback, RFC 1918, CGNAT `100.64.0.0/10`, link-local incl. metadata `169.254.169.254`, `192.0.0.0/24`, benchmarking `198.18.0.0/15`, reserved `240.0.0.0/4`, multicast, IPv6 unique-local and link-local; IPv4-mapped IPv6 is checked as IPv4, NAT64 `64:ff9b::/96` and 6to4 `2002::/16` by their embedded IPv4. A blocked dial is `403 forbidden` "upstream address not allowed". The transport ignores `HTTP_PROXY` env so the guard sees the real target. `UPSTREAM_ALLOW_PRIVATE=true` turns it off (startup warning). Route mode is not guarded: its upstreams are ops-configured and may be local on purpose.
 - Port allow-list (header mode): `UPSTREAM_ALLOW_PORTS` (default `80,443,8443,9443`) is checked on the target port (implicit: 443 https, 80 http); otherwise `403 forbidden` "upstream port not allowed". Invalid entries fail startup.
@@ -55,12 +54,22 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 | `TUNNEL_IDLE_TIMEOUT` | Per-tunnel idle limit, reset by traffic in either direction (default `10m`; must be > 0) |
 | `TUNNEL_TLS_CERT_FILE` / `TUNNEL_TLS_KEY_FILE` | Client-to-proxy TLS pair, both or neither; reloaded on mtime change |
 | `SHUTDOWN_TIMEOUT` | Graceful shutdown budget; must be > 0 |
-| `AUTH_ENABLED`, `AUTH_MODE`, `PROXY_AUTH_TOKEN`, `PROXY_AUTH_HOST_MAP` | Auth (header mode only) |
+| `PROXY_AUTH_TOKEN` / `PROXY_AUTH_HOST_MAP` | Auth (header mode only): off unless one of them is set; the choice also picks the mode |
 | `PROXY_MODE` | `header` (default) or `route` |
 | `ROUTES` | JSON route array (required when `PROXY_MODE=route`) |
 | `ROUTE_MAX_HOPS` | Max `X-L7-Hops` before `508 loop_detected` (default `1`) |
 
 Defaults: [`.env.example`](../.env.example).
+
+### Minimal configs
+
+Every variable is optional.
+
+- **Zero env:** the service starts in header mode on `:8080`, auth off (a startup warning notes the empty allow-list).
+- **Auth:** one variable, `PROXY_AUTH_TOKEN=<token>` (or `PROXY_AUTH_HOST_MAP=<json>` for per-host tokens).
+- **CONNECT tunnel:** two variables, `TUNNEL_ADDR=:8443` and `PROXY_AUTH_TOKEN=<token>`. TLS cert files are recommended, not required. Without a token the tunnel needs `UPSTREAM_ALLOW_HOSTS` or `UPSTREAM_ALLOW_SUFFIXES`.
+
+Legacy `AUTH_ENABLED` and `AUTH_MODE` are ignored except for safety checks, and a startup warning asks to remove them: `AUTH_ENABLED=true` without a token, `AUTH_ENABLED=false` with a token, and an `AUTH_MODE` that contradicts the token variable are startup errors. `AUTH_ENABLED=false` without tokens is valid, so existing deployments keep working. In route mode (no auth) a set token variable or `AUTH_ENABLED=true` is a startup error.
 
 ### CONNECT tunnel
 
@@ -68,12 +77,12 @@ Header mode terminates TLS, so the proxy sees every header and body. The tunnel 
 
 - **Exposure.** `TUNNEL_ADDR` runs its own `http.Server` that accepts only `CONNECT` (anything else is `405 method_not_allowed`). An L7 ingress cannot carry `CONNECT`: expose the port at L4 (a LoadBalancer Service, or ingress TLS passthrough). The header-mode listener is unchanged.
 - **Check order.** Target syntax (`400 bad_target`: must be `host:port`, valid port, no userinfo; lowercased, one trailing dot dropped) → host policy (`UPSTREAM_ALLOW_*`, `UPSTREAM_DENY_HOSTS`; `403`) → `TUNNEL_ALLOW_PORTS` (`403`) → credentials (`407`) → dial.
-- **Auth.** `Proxy-Authorization: Basic base64(user:token)`; the username is ignored, the token is checked by the same validator as header mode (`instance` or `per_host`, keyed by the CONNECT host). A failure is `407` with `Proxy-Authenticate: Basic realm="lux-l7"`. With `AUTH_ENABLED=false` no credentials are needed.
+- **Auth.** `Proxy-Authorization: Basic base64(user:token)`; the username is ignored, the token is checked by the same validator as header mode (`instance` or `per_host`, keyed by the CONNECT host). A failure is `407` with `Proxy-Authenticate: Basic realm="lux-l7"`. With auth off (no token set) no credentials are needed.
 - **Ports.** `TUNNEL_ALLOW_PORTS` defaults to `443`. Exchange WebSocket streams also need `8443` and `9443` (OKX, Binance): add them explicitly, e.g. `TUNNEL_ALLOW_PORTS=443,8443,9443`.
 - **SSRF guard.** The dial uses the same guarded dialer as header mode (`UPSTREAM_ALLOW_PRIVATE`, `UPSTREAM_TIMEOUT`): a blocked resolved IP is `403`, a dial timeout `504`, any other dial failure `502`. A `200 Connection Established` is sent only after the dial succeeds. Bytes the client pipelined behind the `CONNECT` (the TLS ClientHello) are forwarded to the target first.
 - **Lifetime.** `TUNNEL_IDLE_TIMEOUT` is extended by traffic in either direction (a long download with a silent client stays open); there is no cap on total duration. When one side closes its sending half, the other side is half-closed and still drained. No read or write timeout is set on the tunnel server, only `HTTP_READ_HEADER_TIMEOUT` for the CONNECT request. Shutdown stops accepting, lets open tunnels run for up to `SHUTDOWN_TIMEOUT`, then force-closes them.
 - **TLS to the proxy.** With `TUNNEL_TLS_CERT_FILE` + `TUNNEL_TLS_KEY_FILE` the listener speaks TLS 1.2+ with ALPN `http/1.1` only (an h2 `CONNECT` cannot be hijacked). The pair is re-read when either file's mtime changes (cert-manager rotation needs no restart); a failed reload keeps the old certificate and logs a warning. Without them the listener is plain HTTP and logs a startup warning: local tests only, credentials travel in clear text.
-- **Startup errors.** `TUNNEL_ADDR` with `PROXY_MODE=route`; `TUNNEL_ADDR` with `AUTH_ENABLED=false` and no `UPSTREAM_ALLOW_HOSTS` / `UPSTREAM_ALLOW_SUFFIXES` (an open relay); only one of the TLS files; invalid `TUNNEL_ALLOW_PORTS` or `TUNNEL_IDLE_TIMEOUT`.
+- **Startup errors.** `TUNNEL_ADDR` with `PROXY_MODE=route`; `TUNNEL_ADDR` with auth off (no token set) and no `UPSTREAM_ALLOW_HOSTS` / `UPSTREAM_ALLOW_SUFFIXES` (an open relay); only one of the TLS files; invalid `TUNNEL_ALLOW_PORTS` or `TUNNEL_IDLE_TIMEOUT`.
 - **Logging.** Nothing per tunnel at `info`; the client address and `Proxy-Authorization` are never logged. Debug logs the target host only.
 - **Not in v1.** Rate limits and a cap on concurrent tunnels.
 
@@ -110,7 +119,7 @@ Host and SNI rule (upstreams are typically Cloudflare-fronted, which rejects SNI
 - Encoded paths are preserved: `%2F` is not decoded on the way to the upstream, with or without `rewrite_prefix`.
 - `CONNECT` is rejected with `405` / `method_not_allowed`; the tunnel listener is header mode only.
 - `X-Forwarded-Proto` is the proxy's own value (`https` when the client connection used TLS, else `http`); a client-sent value is ignored.
-- Auth is not supported in route mode: `AUTH_ENABLED=true` fails at startup. `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES` and `UPSTREAM_DENY_HOSTS` are ignored (startup warning).
+- Auth is not supported in route mode: `AUTH_ENABLED=true`, `PROXY_AUTH_TOKEN` or `PROXY_AUTH_HOST_MAP` fails at startup. `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES` and `UPSTREAM_DENY_HOSTS` are ignored (startup warning).
 
 ## Planned — cloud native
 

@@ -29,6 +29,10 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(logger)
 
+	for _, w := range cfg.Warnings() {
+		logger.Warn(w)
+	}
+
 	logger.Info("starting", "version", version.Build, "commit", version.Commit, "ref", version.Ref, "built_at", version.BuiltAt)
 
 	var appHandler http.Handler
