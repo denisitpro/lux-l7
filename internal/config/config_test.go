@@ -106,3 +106,25 @@ func TestDefaultSchemeHTTPNeedsAllowHTTP(t *testing.T) {
 		t.Fatalf("cfg = %+v", cfg)
 	}
 }
+
+func TestServerTimeoutDefaultsKeepStreamsAlive(t *testing.T) {
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReadTimeout != 0 || cfg.WriteTimeout != 0 {
+		t.Fatalf("read=%s write=%s, want both 0 (off)", cfg.ReadTimeout, cfg.WriteTimeout)
+	}
+
+	t.Setenv("HTTP_READ_TIMEOUT", "45s")
+	t.Setenv("HTTP_WRITE_TIMEOUT", "50s")
+	cfg, err = config.Load()
+	if err != nil || cfg.ReadTimeout.String() != "45s" || cfg.WriteTimeout.String() != "50s" {
+		t.Fatalf("explicit values: read=%s write=%s err=%v", cfg.ReadTimeout, cfg.WriteTimeout, err)
+	}
+
+	t.Setenv("HTTP_WRITE_TIMEOUT", "-1s")
+	if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "HTTP_WRITE_TIMEOUT") {
+		t.Fatalf("negative write timeout: err=%v", err)
+	}
+}

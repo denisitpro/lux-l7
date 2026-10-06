@@ -1,6 +1,7 @@
 package relay_test
 
 import (
+	"bufio"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -543,5 +544,105 @@ func TestDefaultHostIsUpstreamAuthority(t *testing.T) {
 	}
 	if seenHost != upstream.Listener.Addr().String() || seenFwd != "a.example.com" {
 		t.Fatalf("host=%q fwd=%q", seenHost, seenFwd)
+	}
+}
+
+func TestChunkedBodyOverLimit413(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+	}))
+	t.Cleanup(up.Close)
+	cfg := testCfg()
+	cfg.UpstreamMaxBytes = 8
+	srv := httptest.NewServer(relay.New(cfg, mustRoutes(t, `[{"host":"example.com","path_prefix":"/","upstream":"`+upstreamURL(up)+`"}]`), nil, relay.Options{}))
+	t.Cleanup(srv.Close)
+
+	// io.MultiReader hides the length, so the request goes out chunked.
+	body := io.MultiReader(strings.NewReader("0123456789"), strings.NewReader("abcdef"))
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/", body)
+	req.Host = "example.com"
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	b, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusRequestEntityTooLarge || !strings.Contains(string(b), "body_too_large") {
+		t.Fatalf("status=%d body=%q", res.StatusCode, b)
+	}
+}
+
+func TestSSEStreamsThroughRelay(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for i := 0; i < 5; i++ {
+			_, _ = w.Write([]byte("data: tick\n\n"))
+			w.(http.Flusher).Flush()
+			time.Sleep(100 * time.Millisecond)
+		}
+	}))
+	t.Cleanup(up.Close)
+	srv := httptest.NewServer(relay.New(testCfg(), mustRoutes(t, `[{"host":"example.com","path_prefix":"/","upstream":"`+upstreamURL(up)+`"}]`), nil, relay.Options{}))
+	t.Cleanup(srv.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/", nil)
+	req.Host = "example.com"
+	start := time.Now()
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	br := bufio.NewReader(res.Body)
+	if line, err := br.ReadString('\n'); err != nil || line != "data: tick\n" {
+		t.Fatalf("first event %q err=%v", line, err)
+	}
+	if time.Since(start) > 300*time.Millisecond {
+		t.Fatal("first event was buffered until the stream ended")
+	}
+	rest, _ := io.ReadAll(br)
+	if got := strings.Count(string(rest), "data: tick"); got != 4 {
+		t.Fatalf("remaining events = %d, want 4", got)
+	}
+}
+
+func TestWebSocketUpgradeThroughRelay(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Upgrade") != "websocket" {
+			t.Errorf("Upgrade header = %q", r.Header.Get("Upgrade"))
+		}
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+		_ = rw.Flush()
+		buf := make([]byte, 4)
+		if _, err := io.ReadFull(rw, buf); err == nil {
+			_, _ = conn.Write(append([]byte("echo:"), buf...))
+		}
+	}))
+	t.Cleanup(up.Close)
+	srv := httptest.NewServer(relay.New(testCfg(), mustRoutes(t, `[{"host":"example.com","path_prefix":"/","upstream":"`+upstreamURL(up)+`"}]`), nil, relay.Options{}))
+	t.Cleanup(srv.Close)
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_, _ = conn.Write([]byte("GET / HTTP/1.1\r\nHost: example.com\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"))
+	br := bufio.NewReader(conn)
+	res, err := http.ReadResponse(br, nil)
+	if err != nil || res.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("handshake: res=%v err=%v", res, err)
+	}
+	_, _ = conn.Write([]byte("ping"))
+	got := make([]byte, len("echo:ping"))
+	if _, err := io.ReadFull(br, got); err != nil || string(got) != "echo:ping" {
+		t.Fatalf("echo %q err=%v", got, err)
 	}
 }

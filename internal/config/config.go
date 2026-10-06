@@ -22,8 +22,10 @@ const (
 	defaultLogLevel          = "info"
 	defaultHTTPAddr          = ":8080"
 	defaultReadHeaderTimeout = 5 * time.Second
-	defaultReadTimeout       = 30 * time.Second
-	defaultWriteTimeout      = 30 * time.Second
+	// Read and write timeouts are off by default: they cap the whole request or
+	// response, so they would cut SSE, long downloads, slow uploads and WebSocket.
+	defaultReadTimeout       = 0
+	defaultWriteTimeout      = 0
 	defaultIdleTimeout       = 120 * time.Second
 	defaultShutdownTimeout   = 15 * time.Second
 	defaultUpstreamTimeout   = 30 * time.Second
@@ -246,6 +248,12 @@ func validate(cfg *Config, routesRaw string) error {
 	}
 	if cfg.ShutdownTimeout <= 0 {
 		return fmt.Errorf("SHUTDOWN_TIMEOUT must be > 0, got %s", cfg.ShutdownTimeout)
+	}
+	if cfg.ReadTimeout < 0 {
+		return fmt.Errorf("HTTP_READ_TIMEOUT must be >= 0, got %s", cfg.ReadTimeout)
+	}
+	if cfg.WriteTimeout < 0 {
+		return fmt.Errorf("HTTP_WRITE_TIMEOUT must be >= 0, got %s", cfg.WriteTimeout)
 	}
 	if cfg.TunnelIdleTimeout <= 0 {
 		return fmt.Errorf("TUNNEL_IDLE_TIMEOUT must be > 0, got %s", cfg.TunnelIdleTimeout)
