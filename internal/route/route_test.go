@@ -170,3 +170,29 @@ func TestServerNameResolution(t *testing.T) {
 		}
 	}
 }
+
+func TestPathPrefixTrailingSlashNormalised(t *testing.T) {
+	routes := mustParse(t, `[
+		{"host":"example.com","path_prefix":"/api/","upstream":"http://api.example.net","rewrite_prefix":"/v1"},
+		{"host":"example.com","path_prefix":"/","upstream":"http://web.example.net"},
+		{"host":"example.org","path_prefix":"//","upstream":"http://web.example.net"}
+	]`)
+	if routes[0].PathPrefix != "/api" || routes[1].PathPrefix != "/" || routes[2].PathPrefix != "/" {
+		t.Fatalf("prefixes = %q %q %q", routes[0].PathPrefix, routes[1].PathPrefix, routes[2].PathPrefix)
+	}
+	for path, want := range map[string]int{
+		"/api":   0,
+		"/api/":  0,
+		"/api/x": 0,
+		"/apix":  1,
+		"/other": 1,
+	} {
+		if got := route.Match(routes, "example.com", path); got != want {
+			t.Fatalf("Match(%q) = %d, want %d", path, got, want)
+		}
+	}
+	// rewrite_prefix keeps its meaning: the matched prefix is replaced.
+	if got := route.RewritePath("/api/x", routes[0].PathPrefix, routes[0].RewritePrefix); got != "/v1/x" {
+		t.Fatalf("RewritePath = %q", got)
+	}
+}

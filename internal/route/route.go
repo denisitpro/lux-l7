@@ -82,6 +82,10 @@ func validateRoute(i int, item routeJSON) (Route, error) {
 	if !strings.HasPrefix(pathPrefix, "/") {
 		return Route{}, fmt.Errorf("%s: path_prefix must start with /", prefix)
 	}
+	// A trailing slash is not part of the prefix: "/api/" means "/api" (boundary match).
+	if pathPrefix = strings.TrimRight(pathPrefix, "/"); pathPrefix == "" {
+		pathPrefix = "/"
+	}
 
 	upstreamRaw := strings.TrimSpace(item.Upstream)
 	if upstreamRaw == "" {
