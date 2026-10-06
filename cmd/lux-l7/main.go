@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/denisitpro/lux-l7/internal/auth"
@@ -14,6 +15,7 @@ import (
 	"github.com/denisitpro/lux-l7/internal/front"
 	"github.com/denisitpro/lux-l7/internal/proxy"
 	"github.com/denisitpro/lux-l7/internal/relay"
+	"github.com/denisitpro/lux-l7/internal/tunnel"
 	"github.com/denisitpro/lux-l7/internal/version"
 )
 
@@ -30,13 +32,14 @@ func main() {
 	logger.Info("starting", "version", version.Build)
 
 	var appHandler http.Handler
+	var authValidator *auth.Validator
 	switch cfg.ProxyMode {
 	case config.ProxyModeRoute:
 		logger.Info("proxy mode", "mode", "route", "routes", len(cfg.Routes))
 		appHandler = relay.New(cfg, cfg.Routes, logger, relay.Options{})
 	default:
 		logger.Info("proxy mode", "mode", "header")
-		authValidator, err := auth.New(cfg)
+		authValidator, err = auth.New(cfg)
 		if err != nil {
 			logger.Error("auth", "err", err)
 			os.Exit(1)
@@ -69,14 +72,50 @@ func main() {
 		}
 	}()
 
+	var tun *tunnel.Server
+	if cfg.TunnelAddr != "" {
+		tun, err = tunnel.New(cfg, authValidator, logger)
+		if err != nil {
+			logger.Error("tunnel", "err", err)
+			os.Exit(1)
+		}
+		go func() {
+			logger.Info("tunnel listening", "addr", cfg.TunnelAddr)
+			if err := tun.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("tunnel listen", "err", err)
+				os.Exit(1)
+			}
+		}()
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("shutdown", "err", err)
+	var (
+		wg     sync.WaitGroup
+		failed bool
+		mu     sync.Mutex
+	)
+	shutdown := func(name string, fn func(context.Context) error) {
+		defer wg.Done()
+		if err := fn(shutdownCtx); err != nil {
+			logger.Error("shutdown", "server", name, "err", err)
+			mu.Lock()
+			failed = true
+			mu.Unlock()
+		}
+	}
+	wg.Add(1)
+	go shutdown("http", srv.Shutdown)
+	if tun != nil {
+		wg.Add(1)
+		go shutdown("tunnel", tun.Shutdown)
+	}
+	wg.Wait()
+	if failed {
 		os.Exit(1)
 	}
 	logger.Info("stopped")

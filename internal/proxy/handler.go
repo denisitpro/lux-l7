@@ -144,14 +144,6 @@ func parseTarget(r *http.Request, defaultScheme string, allowHTTP bool) (target,
 	if rawHost == "" {
 		return target{}, errors.New("missing X-L7-Target-Host")
 	}
-	if strings.ContainsAny(rawHost, "/\\?#@") {
-		return target{}, errors.New("invalid X-L7-Target-Host")
-	}
-	rawHost = strings.ToLower(rawHost)
-	if strings.HasPrefix(rawHost, "http://") || strings.HasPrefix(rawHost, "https://") {
-		return target{}, errors.New("X-L7-Target-Host must not include a scheme")
-	}
-
 	scheme := strings.ToLower(strings.TrimSpace(r.Header.Get(headers.TargetScheme)))
 	if scheme == "" {
 		scheme = defaultScheme
@@ -163,20 +155,11 @@ func parseTarget(r *http.Request, defaultScheme string, allowHTTP bool) (target,
 		return target{}, errors.New("http upstream scheme is disabled")
 	}
 
-	host, port := rawHost, ""
-	if strings.Contains(rawHost, ":") {
-		var err error
-		host, port, err = net.SplitHostPort(rawHost)
-		if err != nil {
-			return target{}, errors.New("invalid X-L7-Target-Host port")
-		}
-		if n, err := strconv.ParseUint(port, 10, 16); err != nil || n == 0 {
-			return target{}, errors.New("invalid X-L7-Target-Host port")
-		}
-	}
-	// One trailing dot is the same DNS name; keep it out of policy and dial.
-	host = strings.TrimSuffix(host, ".")
-	if host == "" {
+	host, port, err := policy.SplitAuthority(rawHost)
+	switch {
+	case errors.Is(err, policy.ErrInvalidPort):
+		return target{}, errors.New("invalid X-L7-Target-Host port")
+	case err != nil:
 		return target{}, errors.New("invalid X-L7-Target-Host")
 	}
 	if port != "" {
