@@ -30,6 +30,8 @@ const (
 	defaultUpstreamMaxBytes  = 32 << 20
 	defaultUpstreamScheme    = "https"
 	defaultUpstreamPorts     = "80,443,8443,9443"
+	defaultTunnelPorts       = "443"
+	defaultTunnelIdleTimeout = 10 * time.Minute
 )
 
 // ProxyMode selects header-based or static route-table forwarding.
@@ -82,6 +84,16 @@ type Config struct {
 	AuthMode      AuthMode
 	InstanceToken string
 	HostTokenJSON string
+
+	// TunnelAddr is the CONNECT tunnel listen address; empty disables the tunnel.
+	TunnelAddr string
+	// TunnelAllowPorts lists the target ports a CONNECT client may reach.
+	TunnelAllowPorts []int
+	// TunnelIdleTimeout closes a tunnel after this long without traffic in either direction.
+	TunnelIdleTimeout time.Duration
+	// TunnelTLSCertFile and TunnelTLSKeyFile enable TLS on the tunnel listener (both or neither).
+	TunnelTLSCertFile string
+	TunnelTLSKeyFile  string
 }
 
 // Load reads configuration from the environment after optionally loading test.env.
@@ -113,7 +125,11 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	ports, err := parsePorts(envOr("UPSTREAM_ALLOW_PORTS", defaultUpstreamPorts))
+	ports, err := parsePorts("UPSTREAM_ALLOW_PORTS", envOr("UPSTREAM_ALLOW_PORTS", defaultUpstreamPorts))
+	if err != nil {
+		return Config{}, err
+	}
+	tunnelPorts, err := parsePorts("TUNNEL_ALLOW_PORTS", envOr("TUNNEL_ALLOW_PORTS", defaultTunnelPorts))
 	if err != nil {
 		return Config{}, err
 	}
@@ -140,6 +156,11 @@ func Load() (Config, error) {
 		AuthMode:             AuthMode(envOr("AUTH_MODE", string(AuthModeInstance))),
 		InstanceToken:        strings.TrimSpace(os.Getenv("PROXY_AUTH_TOKEN")),
 		HostTokenJSON:        strings.TrimSpace(os.Getenv("PROXY_AUTH_HOST_MAP")),
+		TunnelAddr:           strings.TrimSpace(os.Getenv("TUNNEL_ADDR")),
+		TunnelAllowPorts:     tunnelPorts,
+		TunnelIdleTimeout:    defaultTunnelIdleTimeout,
+		TunnelTLSCertFile:    strings.TrimSpace(os.Getenv("TUNNEL_TLS_CERT_FILE")),
+		TunnelTLSKeyFile:     strings.TrimSpace(os.Getenv("TUNNEL_TLS_KEY_FILE")),
 	}
 
 	level, err := parseLevel(envOr("LOG_LEVEL", defaultLogLevel))
@@ -185,6 +206,7 @@ func fillDurations(cfg *Config) error {
 		{"HTTP_IDLE_TIMEOUT", &cfg.IdleTimeout},
 		{"SHUTDOWN_TIMEOUT", &cfg.ShutdownTimeout},
 		{"UPSTREAM_TIMEOUT", &cfg.UpstreamTimeout},
+		{"TUNNEL_IDLE_TIMEOUT", &cfg.TunnelIdleTimeout},
 	}
 	for _, f := range fields {
 		raw := strings.TrimSpace(os.Getenv(f.key))
@@ -217,6 +239,9 @@ func validate(cfg *Config, routesRaw string) error {
 	}
 	if cfg.ShutdownTimeout <= 0 {
 		return fmt.Errorf("SHUTDOWN_TIMEOUT must be > 0, got %s", cfg.ShutdownTimeout)
+	}
+	if cfg.TunnelIdleTimeout <= 0 {
+		return fmt.Errorf("TUNNEL_IDLE_TIMEOUT must be > 0, got %s", cfg.TunnelIdleTimeout)
 	}
 	switch cfg.ProxyMode {
 	case ProxyModeHeader, ProxyModeRoute:
@@ -280,11 +305,32 @@ func validate(cfg *Config, routesRaw string) error {
 	if cfg.AuthEnabled && cfg.AuthMode == AuthModePerHost && cfg.HostTokenJSON == "" {
 		return fmt.Errorf("AUTH_ENABLED with AUTH_MODE=per_host requires PROXY_AUTH_HOST_MAP")
 	}
+	if err := validateTunnel(cfg); err != nil {
+		return err
+	}
 	if cfg.ProxyMode == ProxyModeRoute && (len(cfg.AllowHosts) > 0 || len(cfg.AllowSuffixes) > 0 || len(cfg.DenyHosts) > 0) {
 		slog.Default().Warn("UPSTREAM_ALLOW_HOSTS, UPSTREAM_ALLOW_SUFFIXES and UPSTREAM_DENY_HOSTS are ignored in route mode")
 	}
 	if cfg.ProxyMode == ProxyModeHeader && len(cfg.AllowHosts) == 0 && len(cfg.AllowSuffixes) == 0 {
 		slog.Default().Warn("upstream allow-list empty: any host may be targeted unless UPSTREAM_DENY_HOSTS blocks it")
+	}
+	return nil
+}
+
+// validateTunnel rejects tunnel settings that would expose an open CONNECT relay or
+// a half-configured TLS listener.
+func validateTunnel(cfg *Config) error {
+	if (cfg.TunnelTLSCertFile == "") != (cfg.TunnelTLSKeyFile == "") {
+		return fmt.Errorf("TUNNEL_TLS_CERT_FILE and TUNNEL_TLS_KEY_FILE must be set together")
+	}
+	if cfg.TunnelAddr == "" {
+		return nil
+	}
+	if cfg.ProxyMode == ProxyModeRoute {
+		return fmt.Errorf("TUNNEL_ADDR is not supported when PROXY_MODE=route")
+	}
+	if !cfg.AuthEnabled && len(cfg.AllowHosts) == 0 && len(cfg.AllowSuffixes) == 0 {
+		return fmt.Errorf("TUNNEL_ADDR with AUTH_ENABLED=false requires UPSTREAM_ALLOW_HOSTS or UPSTREAM_ALLOW_SUFFIXES: an open CONNECT relay is refused")
 	}
 	return nil
 }
@@ -310,17 +356,17 @@ func envBool(key string, fallback bool) (bool, error) {
 	return b, nil
 }
 
-func parsePorts(raw string) ([]int, error) {
+func parsePorts(name, raw string) ([]int, error) {
 	var out []int
 	for _, p := range splitCSV(raw) {
 		n, err := strconv.ParseUint(p, 10, 16)
 		if err != nil || n == 0 {
-			return nil, fmt.Errorf("UPSTREAM_ALLOW_PORTS: invalid port %q", p)
+			return nil, fmt.Errorf("%s: invalid port %q", name, p)
 		}
 		out = append(out, int(n))
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("UPSTREAM_ALLOW_PORTS: no ports")
+		return nil, fmt.Errorf("%s: no ports", name)
 	}
 	return out, nil
 }
