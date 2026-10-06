@@ -1,8 +1,10 @@
 // Package metrics is the Prometheus instrumentation of lux-l7 (#1). Series live in a
 // dedicated registry that the caller owns, never the global default, so tests stay
 // hermetic. /metrics is served only by Server, on METRICS_ADDR; the proxy and tunnel
-// listeners never expose it. A nil *Metrics or *Observation records nothing, so the
-// instrumented code needs no "metrics on?" branches. Host labels are bounded by
+// listeners never expose it. Request observation (Observer, Observation, Sink) is
+// separate from this export: Metrics is one Sink, the request log (internal/reqlog)
+// another. A nil *Observer or *Observation records nothing, so the instrumented
+// code needs no "observing on?" branches. Host labels are bounded by
 // construction, see Hosts.
 package metrics
 

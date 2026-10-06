@@ -38,15 +38,15 @@ type Handler struct {
 	ports  map[int]struct{} // empty: no port restriction (config.Load always sets a default)
 	log    *slog.Logger
 
-	metrics *metrics.Metrics // nil: records nothing
+	observer *metrics.Observer // nil: records nothing
 }
 
 // Option customizes New.
 type Option func(*Handler)
 
-// WithMetrics makes the handler record request series on m.
-func WithMetrics(m *metrics.Metrics) Option {
-	return func(h *Handler) { h.metrics = m }
+// WithObserver makes the handler report every request to o (metrics, request log).
+func WithObserver(o *metrics.Observer) Option {
+	return func(h *Handler) { h.observer = o }
 }
 
 // New builds the L7 proxy handler.
@@ -86,7 +86,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 		Rewrite:   h.rewrite,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			ObserveUpstreamError(metrics.From(w), err)
-			WriteUpstreamError(w, h.log, err, "path", r.URL.Path)
+			WriteUpstreamError(w, err)
 		},
 	}
 	h.proxy = rp
@@ -94,7 +94,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 }
 
 func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	w, obs := h.metrics.Begin(metrics.ModeHeader, rw)
+	w, obs := h.observer.Begin(metrics.ModeHeader, rw, r)
 	defer obs.Done()
 	obs.Ingress(r.Host)
 	t, err := parseTarget(r, h.cfg.UpstreamScheme, h.cfg.UpstreamAllowHTTP)

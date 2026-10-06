@@ -65,6 +65,11 @@ func newMetrics(opts metrics.Options) (*prometheus.Registry, *metrics.Metrics) {
 	return reg, metrics.New(reg, opts)
 }
 
+// begin starts observing a GET / for m only.
+func begin(m *metrics.Metrics, mode metrics.Mode, w http.ResponseWriter) (http.ResponseWriter, *metrics.Observation) {
+	return metrics.NewObserver(m).Begin(mode, w, httptest.NewRequest(http.MethodGet, "/", nil))
+}
+
 func get(t *testing.T, url, host string, hdr map[string]string) int {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
@@ -101,7 +106,7 @@ func TestHeaderModeCounters(t *testing.T) {
 		AllowSuffixes:   []string{"example.com"},
 	}
 	v, _ := auth.New(cfg)
-	srv := httptest.NewServer(proxy.New(cfg, v, discard, proxy.WithMetrics(m)))
+	srv := httptest.NewServer(proxy.New(cfg, v, discard, proxy.WithObserver(metrics.NewObserver(m))))
 	t.Cleanup(srv.Close)
 
 	target := func(a string) map[string]string {
@@ -148,7 +153,7 @@ func TestRouteModeCounters(t *testing.T) {
 	}
 	reg, m := newMetrics(metrics.Options{})
 	cfg := config.Config{UpstreamMaxBytes: 1 << 20, RouteMaxHops: 1, UpstreamTimeout: 2 * time.Second}
-	srv := httptest.NewServer(relay.New(cfg, routes, discard, relay.Options{Metrics: m}))
+	srv := httptest.NewServer(relay.New(cfg, routes, discard, relay.Options{Observer: metrics.NewObserver(m)}))
 	t.Cleanup(srv.Close)
 
 	if c := get(t, srv.URL+"/ok", "example.com", nil); c != 200 {
@@ -195,7 +200,7 @@ func TestTunnelCounters(t *testing.T) {
 		AllowHosts: []string{"127.0.0.1"}, TunnelAllowPorts: []int{port}, TunnelIdleTimeout: 5 * time.Second,
 	}
 	v, _ := auth.New(cfg)
-	ts, err := tunnel.New(cfg, v, discard, tunnel.WithMetrics(m))
+	ts, err := tunnel.New(cfg, v, discard, tunnel.WithObserver(metrics.NewObserver(m)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,14 +262,14 @@ func TestUnknownHostsCollapseToOther(t *testing.T) {
 	rnd := func(suffix string) string { return fmt.Sprintf("h%d-%d%s", rng.Int63(), rng.Int63(), suffix) }
 
 	for i := 0; i < 1000; i++ {
-		w, obs := m.Begin(metrics.ModeHeader, httptest.NewRecorder())
+		w, obs := begin(m, metrics.ModeHeader, httptest.NewRecorder())
 		obs.Ingress(rnd(".example.com") + ":8443")
 		obs.Upstream(p, rnd(".evil.net"))
 		w.WriteHeader(http.StatusOK)
 		obs.Done()
 	}
 	// Known names still resolve; the suffix entry is reported as configured.
-	w, obs := m.Begin(metrics.ModeHeader, httptest.NewRecorder())
+	w, obs := begin(m, metrics.ModeHeader, httptest.NewRecorder())
 	obs.Ingress("FRONT.example.com")
 	obs.Upstream(p, rnd(".example.org"))
 	w.WriteHeader(http.StatusOK)
@@ -304,15 +309,18 @@ func TestHostsMapping(t *testing.T) {
 	}
 }
 
-func TestNilMetricsRecordNothing(t *testing.T) {
-	var m *metrics.Metrics
+func TestNilObserverRecordsNothing(t *testing.T) {
+	var o *metrics.Observer
 	rec := httptest.NewRecorder()
-	w, obs := m.Begin(metrics.ModeHeader, rec)
+	w, obs := o.Begin(metrics.ModeHeader, rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if obs != nil || w != http.ResponseWriter(rec) {
-		t.Fatal("nil Metrics must pass the writer through")
+		t.Fatal("nil Observer must pass the writer through")
+	}
+	if metrics.NewObserver() != nil {
+		t.Fatal("an Observer without sinks must be nil")
 	}
 	obs.Ingress("x")
-	obs.Route("x", "y")
+	obs.Route(0, "x", "y")
 	obs.Upstream(policy.New(nil, nil, nil), "x")
 	obs.Reject(metrics.RejectNoRoute)
 	obs.UpstreamError(metrics.UpstreamOther)
@@ -326,7 +334,7 @@ func TestNilMetricsRecordNothing(t *testing.T) {
 
 func TestClientCancelIsErrorClass(t *testing.T) {
 	reg, m := newMetrics(metrics.Options{})
-	_, obs := m.Begin(metrics.ModeHeader, httptest.NewRecorder())
+	_, obs := begin(m, metrics.ModeHeader, httptest.NewRecorder())
 	proxy.ObserveUpstreamError(obs, context.Canceled)
 	obs.Done() // nothing was written
 	body := scrape(t, reg)
@@ -338,7 +346,7 @@ func TestClientCancelIsErrorClass(t *testing.T) {
 // rejection, not an upstream failure.
 func TestBodyCutIsRejectionNotUpstreamError(t *testing.T) {
 	reg, m := newMetrics(metrics.Options{})
-	_, obs := m.Begin(metrics.ModeHeader, httptest.NewRecorder())
+	_, obs := begin(m, metrics.ModeHeader, httptest.NewRecorder())
 	proxy.ObserveUpstreamError(obs, fmt.Errorf("transport: %w", &http.MaxBytesError{Limit: 10}))
 	obs.Done()
 	body := scrape(t, reg)
@@ -360,7 +368,7 @@ func TestStartEmptyAddrIsOff(t *testing.T) {
 
 func TestStartServesOnlyMetrics(t *testing.T) {
 	reg, m := newMetrics(metrics.Options{Location: "eu-1"})
-	_, obs := m.Begin(metrics.ModeRoute, httptest.NewRecorder())
+	_, obs := begin(m, metrics.ModeRoute, httptest.NewRecorder())
 	obs.Done()
 
 	srv, err := metrics.Start(discard, "127.0.0.1:0", reg)
@@ -395,7 +403,7 @@ func TestMetricsNotOnProxyListener(t *testing.T) {
 	_, m := newMetrics(metrics.Options{})
 	cfg := config.Config{}
 	v, _ := auth.New(cfg)
-	srv := httptest.NewServer(proxy.New(cfg, v, discard, proxy.WithMetrics(m)))
+	srv := httptest.NewServer(proxy.New(cfg, v, discard, proxy.WithObserver(metrics.NewObserver(m))))
 	t.Cleanup(srv.Close)
 	if c := get(t, srv.URL+"/metrics", "", nil); c != http.StatusBadRequest {
 		t.Fatalf("proxy listener answered /metrics with %d, want the normal bad_target 400", c)

@@ -96,7 +96,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 - **HTTP/1.1 from clients:** the main listener has no TLS configuration and no h2c, so it serves HTTP/1.x; TLS is expected to end at an ingress. The tunnel TLS listener offers ALPN `http/1.1` only.
 - **HTTP to upstream:** both modes use a transport with `ForceAttemptHTTP2: true`, so an https upstream may be spoken to over HTTP/2 when it negotiates `h2`; the code does nothing more. TLS to upstream is 1.2 or higher.
 - **WebSocket and streaming through header or route mode:** SSE, long downloads, slow uploads and WebSocket (`Upgrade`, then bytes both ways) pass through `httputil.ReverseProxy`; tests cover SSE and a raw WebSocket handshake in both modes. `HTTP_READ_TIMEOUT` and `HTTP_WRITE_TIMEOUT` default to `0` (off); the protection is `HTTP_READ_HEADER_TIMEOUT`, `HTTP_IDLE_TIMEOUT` and the upstream response-header wait (`UPSTREAM_TIMEOUT`). Setting a non-zero read or write timeout caps the whole request or response and cuts streams again ([#6](https://github.com/denisitpro/lux-l7/issues/6)). The CONNECT tunnel remains an option for raw long-lived connections (add ports 8443 and 9443 to `TUNNEL_ALLOW_PORTS`).
-- **Upstream errors:** an upstream timeout is `504 upstream_timeout`; another dial or transport error `502 bad_gateway`; a client cancel gets no response (debug log). Same in both modes and in the tunnel dial.
+- **Upstream errors:** an upstream timeout is `504 upstream_timeout`; another dial or transport error `502 bad_gateway`; a client cancel gets no response (it shows only in the `debug` request line). Same in both modes and in the tunnel dial.
 - **Paths:** passed verbatim, no cleaning or redirects (`//a//b`, `/a/../b`).
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); error mapping and verbatim paths [#30](https://github.com/denisitpro/lux-l7/pull/30).
 
@@ -125,10 +125,12 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 ### JSON logs
 
-- **What:** structured JSON on stdout (`log/slog`); level from `LOG_LEVEL`. Config warnings are logged after the handler is installed.
+- **What:** structured JSON on stdout (`log/slog`); level from `LOG_LEVEL`. There is no other logging variable: the proxy mode decides what each level emits. Config warnings are logged after the handler is installed. Logging works the same with `METRICS_ADDR` on or off.
 - **Enable:** always on; `LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`).
-- **Limits:** the tunnel logs nothing per connection at `info` and never the client address or `Proxy-Authorization` (debug logs the target host). Header mode logs the request path on upstream errors; route mode logs the route index and upstream only. Minimal production logging is [#24](https://github.com/denisitpro/lux-l7/issues/24). No request IDs exist in the code.
-- **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2).
+- **Header mode and tunnel** (the log must not leak): at `info` nothing per request, and never the client address, path, query, target host or a token. At `warn` and `error` an upstream failure is logged as its reason only (`timeout`, `blocked` at `warn`; any other transport fault at `error`), deduplicated: the first occurrence at once, then one `upstream errors repeated` line with a count per minute, and the next failure after a quiet minute is logged at once again. At `debug` one `request` line per request: method, target host (`host[:port]`), status (`0`: no response written), `duration_ms`, `bytes` (a tunnel: bytes relayed both ways, logged when it closes), and `error` when refused or failed. Never path, query, tokens or client address.
+- **Route mode** (the operator must see how upstreams behave): at `info` one `route summary` line per minute for every route that had traffic, none when idle: route index, upstream host, `requests`, `status` classes, `errors` by reason, `p50_ms` and `p95_ms` (nearest rank over the latest 4096 requests of the minute). At `warn` an upstream state change, once each: `upstream failing` after 5 consecutive upstream errors (with the last reason) and `upstream recovered` on the first response afterwards; a client cancel or a refusal before the upstream does not count. At `debug` one `request` line per request: route index, upstream host, status, `duration_ms`, `bytes`; no query, no client address. A request that matched no route is not logged.
+- **Limits:** every level includes the ones above it (`debug` shows `info` and `warn` lines too). The summary interval is fixed at one minute. The last partial interval is flushed on shutdown. Upstream error text is never logged (it can name the dial address). No request IDs exist in the code.
+- **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); per-mode logging [#54](https://github.com/denisitpro/lux-l7/issues/54).
 
 ### Prometheus metrics
 
