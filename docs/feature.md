@@ -19,6 +19,8 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 - Request paths are passed verbatim (`//a//b`, `/a/../b` are not cleaned or redirected); only `GET /healthz`, `/readyz`, `/version` are served locally.
 - Auth **disabled by default** for local and integration tests.
 - Single static binary, container image (`Dockerfile`), CI (`.github/workflows/ci.yml`: `go test -race`) and image release (`docker-release.yml`), Dependabot.
+- SSRF guard (header mode, [#3](https://github.com/denisitpro/lux-l7/issues/3)): the resolved IP is checked at dial time (`internal/egress`, `net.Dialer.Control`), so names resolving or rebinding to internal addresses are refused. Blocked: unspecified, `0.0.0.0/8`, loopback, RFC 1918, CGNAT `100.64.0.0/10`, link-local incl. metadata `169.254.169.254`, `192.0.0.0/24`, benchmarking `198.18.0.0/15`, reserved `240.0.0.0/4`, multicast, IPv6 unique-local and link-local; IPv4-mapped IPv6 is checked as IPv4, NAT64 `64:ff9b::/96` and 6to4 `2002::/16` by their embedded IPv4. A blocked dial is `403 forbidden` "upstream address not allowed". The transport ignores `HTTP_PROXY` env so the guard sees the real target. `UPSTREAM_ALLOW_PRIVATE=true` turns it off (startup warning). Route mode is not guarded: its upstreams are ops-configured and may be local on purpose.
+- Port allow-list (header mode): `UPSTREAM_ALLOW_PORTS` (default `80,443,8443,9443`) is checked on the target port (implicit: 443 https, 80 http); otherwise `403 forbidden` "upstream port not allowed". Invalid entries fail startup.
 - **Route mode** (`PROXY_MODE=route`): static `ROUTES` table (host + path prefix → upstream origin). Client `X-L7-*` routing headers are ignored. Loop guard via `X-L7-Hops` / `ROUTE_MAX_HOPS`. `/healthz`, `/readyz`, `/version` stay local.
 
 ## Planned — core proxy
@@ -42,6 +44,8 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 | `UPSTREAM_ALLOW_HOSTS` / `UPSTREAM_ALLOW_SUFFIXES` / `UPSTREAM_DENY_HOSTS` | Upstream policy (header mode only) |
 | `UPSTREAM_DEFAULT_SCHEME`, `UPSTREAM_TIMEOUT`, `UPSTREAM_MAX_BYTES` | Defaults and limits; timeout and max bytes must be > 0 |
 | `UPSTREAM_ALLOW_HTTP` | Allow `http` upstreams in header mode (default `false`) |
+| `UPSTREAM_ALLOW_PRIVATE` | Disable the SSRF guard in header mode (default `false`; local tests only) |
+| `UPSTREAM_ALLOW_PORTS` | CSV of reachable target ports in header mode (default `80,443,8443,9443`) |
 | `SHUTDOWN_TIMEOUT` | Graceful shutdown budget; must be > 0 |
 | `AUTH_ENABLED`, `AUTH_MODE`, `PROXY_AUTH_TOKEN`, `PROXY_AUTH_HOST_MAP` | Auth (header mode only) |
 | `PROXY_MODE` | `header` (default) or `route` |
@@ -83,8 +87,6 @@ Host and SNI rule (upstreams are typically Cloudflare-fronted, which rejects SNI
 - Deploy: plain image through a generic Helm chart; no repo-owned manifests for now.
 
 ## Planned — security
-
-GitHub: [#3](https://github.com/denisitpro/lux-l7/issues/3) — SSRF guard: resolved-IP check at dial time blocks loopback, private, link-local and metadata addresses; port allow-list.
 
 - Refuse to start with an empty allow-list unless `UPSTREAM_ALLOW_ANY=true` (client tokens are extractable; the allow-list is the real abuse guard). GitHub: [#7](https://github.com/denisitpro/lux-l7/issues/7).
 - Optional client IP forwarding (`X-Forwarded-For`) with trusted-hop handling. GitHub: [#8](https://github.com/denisitpro/lux-l7/issues/8).

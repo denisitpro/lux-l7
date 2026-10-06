@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -30,10 +31,11 @@ func TestForwardToUpstream(t *testing.T) {
 
 	authority := upstream.Listener.Addr().String()
 	cfg := config.Config{
-		UpstreamScheme:    "http",
-		UpstreamAllowHTTP: true,
-		AllowHosts:        []string{"127.0.0.1"},
-		AuthEnabled:       false,
+		UpstreamScheme:       "http",
+		UpstreamAllowHTTP:    true,
+		UpstreamAllowPrivate: true,
+		AllowHosts:           []string{"127.0.0.1"},
+		AuthEnabled:          false,
 	}
 	v, err := auth.New(cfg)
 	if err != nil {
@@ -123,7 +125,7 @@ func okUpstream(t *testing.T, onReq func(*http.Request)) *httptest.Server {
 }
 
 func httpCfg() config.Config {
-	return config.Config{UpstreamScheme: "http", UpstreamAllowHTTP: true, UpstreamMaxBytes: 1 << 20}
+	return config.Config{UpstreamScheme: "http", UpstreamAllowHTTP: true, UpstreamAllowPrivate: true, UpstreamMaxBytes: 1 << 20}
 }
 
 func TestAuthInstance401And403(t *testing.T) {
@@ -318,5 +320,60 @@ func TestUpstreamDialFailure502(t *testing.T) {
 	code, body := do(t, newProxy(t, httpCfg()), map[string]string{headers.TargetHost: addr})
 	if code != http.StatusBadGateway || !strings.Contains(body, "bad_gateway") {
 		t.Fatalf("status=%d body=%s", code, body)
+	}
+}
+
+func TestSSRFGuardBlocksResolvedPrivateIP(t *testing.T) {
+	up := okUpstream(t, nil)
+	port := up.Listener.Addr().String()
+	port = port[strings.LastIndex(port, ":")+1:]
+
+	cfg := httpCfg()
+	cfg.UpstreamAllowPrivate = false
+	url := newProxy(t, cfg)
+	// localhost is a name, not an IP literal: only a resolved-IP check catches it.
+	for _, host := range []string{"localhost:" + port, "127.0.0.1:" + port, "[::1]:" + port, "169.254.169.254:" + port} {
+		code, body := do(t, url, map[string]string{headers.TargetHost: host})
+		if code != http.StatusForbidden || !strings.Contains(body, "upstream address not allowed") {
+			t.Fatalf("%q: status=%d body=%s", host, code, body)
+		}
+	}
+
+	cfg.UpstreamAllowPrivate = true
+	if code, _ := do(t, newProxy(t, cfg), map[string]string{headers.TargetHost: "localhost:" + port}); code != http.StatusOK {
+		t.Fatalf("allow private: status=%d", code)
+	}
+}
+
+func TestUpstreamPortAllowList(t *testing.T) {
+	up := okUpstream(t, nil)
+	port := up.Listener.Addr().String()
+	port = port[strings.LastIndex(port, ":")+1:]
+	n, _ := strconv.Atoi(port)
+
+	cfg := httpCfg()
+	cfg.UpstreamAllowPorts = []int{80, 443}
+	url := newProxy(t, cfg)
+	for _, host := range []string{"localhost:" + port, "localhost:8443", "localhost:22"} {
+		code, body := do(t, url, map[string]string{headers.TargetHost: host})
+		if code != http.StatusForbidden || !strings.Contains(body, "upstream port not allowed") {
+			t.Fatalf("%q: status=%d body=%s", host, code, body)
+		}
+	}
+
+	cfg.UpstreamAllowPorts = []int{n}
+	if code, _ := do(t, newProxy(t, cfg), map[string]string{headers.TargetHost: "localhost:" + port}); code != http.StatusOK {
+		t.Fatalf("listed port: status=%d", code)
+	}
+
+	// Implicit port: https -> 443, http -> 80. Neither is listed, so both are refused
+	// before any dial.
+	cfg.UpstreamAllowPorts = []int{n}
+	url = newProxy(t, cfg)
+	for _, scheme := range []string{"http", "https"} {
+		code, body := do(t, url, map[string]string{headers.TargetHost: "localhost", headers.TargetScheme: scheme})
+		if code != http.StatusForbidden || !strings.Contains(body, "upstream port not allowed") {
+			t.Fatalf("implicit %s: status=%d body=%s", scheme, code, body)
+		}
 	}
 }

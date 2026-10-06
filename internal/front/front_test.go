@@ -74,7 +74,7 @@ var oddPaths = []string{"//a//b", "/a/../b", "/a/./b", "//"}
 
 func TestHeaderModePathsReachUpstreamUnchanged(t *testing.T) {
 	rec := newRecorder(t)
-	cfg := config.Config{UpstreamScheme: "http", UpstreamAllowHTTP: true, UpstreamMaxBytes: 1 << 20}
+	cfg := config.Config{UpstreamScheme: "http", UpstreamAllowHTTP: true, UpstreamAllowPrivate: true, UpstreamMaxBytes: 1 << 20}
 	v, _ := auth.New(cfg)
 	srv := httptest.NewServer(front.New(proxy.New(cfg, v, nil)))
 	t.Cleanup(srv.Close)
