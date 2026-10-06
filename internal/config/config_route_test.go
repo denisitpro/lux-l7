@@ -69,11 +69,10 @@ func TestRouteModeRejectsAuth(t *testing.T) {
 	}
 }
 
-func TestRouteModeHTTPSSuffixNeedsHostHeader(t *testing.T) {
+func TestRouteModeHTTPSSuffixWithoutHostHeaderLoads(t *testing.T) {
 	t.Setenv("PROXY_MODE", "route")
-	t.Setenv("ROUTES", `[{"host":".example.com","path_prefix":"/","upstream":"https://127.0.0.1:443"}]`)
-	_, err := config.Load()
-	if err == nil || !strings.Contains(err.Error(), "host_header") {
+	t.Setenv("ROUTES", `[{"host":".example.com","path_prefix":"/","upstream":"https://origin.example.net:443"}]`)
+	if _, err := config.Load(); err != nil {
 		t.Fatalf("got %v", err)
 	}
 }
