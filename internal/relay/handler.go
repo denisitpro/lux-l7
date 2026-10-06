@@ -56,8 +56,7 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				// Minimal logging (#24): no client or request data. Transport errors name
 				// the dial address and the failure, never the request path or query.
-				h.log.Error("upstream", "err", err, "route", idx, "upstream", rt.Upstream.String())
-				proxy.WriteJSON(w, http.StatusBadGateway, "bad_gateway", "upstream request failed")
+				proxy.WriteUpstreamError(w, h.log, err, "route", idx, "upstream", rt.Upstream.String())
 			},
 		}
 	}
@@ -132,13 +131,10 @@ func (h *Handler) rewrite(pr *httputil.ProxyRequest, idx int) {
 	// Client IP forwarding (X-Forwarded-For); trusted-hop handling is #8.
 	pr.SetXForwarded()
 	pr.Out.Header.Set("X-Forwarded-Host", pr.In.Host)
-	proto := pr.In.Header.Get("X-Forwarded-Proto")
-	if proto == "" {
-		if pr.In.TLS != nil {
-			proto = "https"
-		} else {
-			proto = "http"
-		}
+	// The proxy's own view of the client connection, never a client-sent value.
+	proto := "http"
+	if pr.In.TLS != nil {
+		proto = "https"
 	}
 	pr.Out.Header.Set("X-Forwarded-Proto", proto)
 }

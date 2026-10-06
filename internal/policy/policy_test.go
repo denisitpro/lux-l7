@@ -22,3 +22,21 @@ func TestPolicySuffix(t *testing.T) {
 		t.Fatal("suffix should block")
 	}
 }
+
+func TestPolicyTrailingDotAndCase(t *testing.T) {
+	deny := policy.New(nil, nil, []string{"Localhost"})
+	for _, a := range []string{"localhost", "localhost.", "LOCALHOST:8080", "localhost.:8080"} {
+		if deny.Allowed(a) {
+			t.Fatalf("deny must match %q", a)
+		}
+	}
+	allow := policy.New([]string{"api.example.com."}, []string{"example.org."}, nil)
+	for _, a := range []string{"api.example.com", "api.example.com.", "api.example.com.:443", "www.example.org."} {
+		if !allow.Allowed(a) {
+			t.Fatalf("allow must match %q", a)
+		}
+	}
+	if allow.Allowed("other.example.net.") {
+		t.Fatal("unlisted host must stay blocked")
+	}
+}

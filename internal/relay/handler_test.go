@@ -465,3 +465,64 @@ func TestConnectRejected(t *testing.T) {
 		t.Fatal("upstream called")
 	}
 }
+
+func TestForwardedProtoIsProxyOwn(t *testing.T) {
+	var seen string
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get("X-Forwarded-Proto")
+	}))
+	t.Cleanup(upstream.Close)
+	routes := mustRoutes(t, `[{"host":"example.com","path_prefix":"/","upstream":"`+upstreamURL(upstream)+`"}]`)
+	h := relay.New(testCfg(), routes, nil, relay.Options{})
+
+	plain := httptest.NewServer(h)
+	t.Cleanup(plain.Close)
+	req, _ := http.NewRequest(http.MethodGet, plain.URL+"/", nil)
+	req.Host = "example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if seen != "http" {
+		t.Fatalf("plain client connection: X-Forwarded-Proto=%q, want http", seen)
+	}
+
+	secure := httptest.NewTLSServer(h)
+	t.Cleanup(secure.Close)
+	req, _ = http.NewRequest(http.MethodGet, secure.URL+"/", nil)
+	req.Host = "example.com"
+	req.Header.Set("X-Forwarded-Proto", "http")
+	res, err = secure.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if seen != "https" {
+		t.Fatalf("TLS client connection: X-Forwarded-Proto=%q, want https", seen)
+	}
+}
+
+func TestUpstreamTimeout504(t *testing.T) {
+	done := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-done:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(slow.Close)
+	t.Cleanup(func() { close(done) })
+
+	cfg := testCfg()
+	cfg.UpstreamTimeout = 50 * time.Millisecond
+	routes := mustRoutes(t, `[{"host":"example.com","path_prefix":"/","upstream":"`+upstreamURL(slow)+`"}]`)
+	srv := httptest.NewServer(relay.New(cfg, routes, nil, relay.Options{}))
+	t.Cleanup(srv.Close)
+
+	res := doGet(t, srv.URL+"/", "example.com")
+	if res.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+}

@@ -1,6 +1,6 @@
 # Feature list
 
-> Status: living · Last verified: 2026-10-05 · [AI - composer-2.5]
+> Status: living · Last verified: 2026-10-06 · [AI - claude-sonnet-5-5]
 
 L7 egress proxy for mobile and backend API traffic: one stable entrypoint outside restrictive networks; upstream host chosen per request instead of a static ingress `externalName` per target.
 
@@ -11,7 +11,12 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 - L7 reverse proxy: `X-L7-Target-Host`, optional `X-L7-Target-Scheme` (default from `UPSTREAM_DEFAULT_SCHEME`).
 - Upstream allow/deny via `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES`, `UPSTREAM_DENY_HOSTS`.
 - Auth optional (`AUTH_ENABLED=false` by default): `X-L7-Proxy-Token`, modes `instance` / `per_host`.
-- Routing headers stripped before the upstream request.
+- Routing headers stripped before the upstream request; in header mode a client `X-L7-Hops` is stripped too.
+- Target validation (header mode, `400 bad_target`): no userinfo (`@`), non-empty host, numeric port `1..65535`. One trailing dot in the host is dropped (`localhost.` is `localhost`) before policy, auth and dial.
+- Plain-http upstreams are off by default: `X-L7-Target-Scheme: http` is `400 bad_target` unless `UPSTREAM_ALLOW_HTTP=true`; `UPSTREAM_DEFAULT_SCHEME=http` without it fails at startup.
+- Startup config errors: unparsable booleans (`AUTH_ENABLED=yes`), `UPSTREAM_MAX_BYTES`/`UPSTREAM_TIMEOUT`/`SHUTDOWN_TIMEOUT` <= 0, and port-bearing entries in the allow/deny lists (policy compares bare hostnames).
+- Upstream failures: timeout `504` / `upstream_timeout`, other dial or transport errors `502` / `bad_gateway`; a client cancel gets no response and is logged at debug (both modes).
+- Request paths are passed verbatim (`//a//b`, `/a/../b` are not cleaned or redirected); only `GET /healthz`, `/readyz`, `/version` are served locally.
 - Auth **disabled by default** for local and integration tests.
 - Single static binary, container image (`Dockerfile`), CI (`.github/workflows/ci.yml`: `go test -race`) and image release (`docker-release.yml`), Dependabot.
 - **Route mode** (`PROXY_MODE=route`): static `ROUTES` table (host + path prefix → upstream origin). Client `X-L7-*` routing headers are ignored. Loop guard via `X-L7-Hops` / `ROUTE_MAX_HOPS`. `/healthz`, `/readyz`, `/version` stay local.
@@ -27,7 +32,7 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 | Header | Required | Meaning |
 |---|---|---|
 | `X-L7-Target-Host` | yes | Upstream authority without scheme |
-| `X-L7-Target-Scheme` | no | `http` or `https`; default `UPSTREAM_DEFAULT_SCHEME` |
+| `X-L7-Target-Scheme` | no | `https`, or `http` when `UPSTREAM_ALLOW_HTTP=true`; default `UPSTREAM_DEFAULT_SCHEME` |
 | `X-L7-Proxy-Token` | when auth on | Instance or per-host token |
 
 ## Env (summary)
@@ -35,7 +40,9 @@ L7 egress proxy for mobile and backend API traffic: one stable entrypoint outsid
 | Variable | Role |
 |---|---|
 | `UPSTREAM_ALLOW_HOSTS` / `UPSTREAM_ALLOW_SUFFIXES` / `UPSTREAM_DENY_HOSTS` | Upstream policy (header mode only) |
-| `UPSTREAM_DEFAULT_SCHEME`, `UPSTREAM_TIMEOUT`, `UPSTREAM_MAX_BYTES` | Defaults and limits |
+| `UPSTREAM_DEFAULT_SCHEME`, `UPSTREAM_TIMEOUT`, `UPSTREAM_MAX_BYTES` | Defaults and limits; timeout and max bytes must be > 0 |
+| `UPSTREAM_ALLOW_HTTP` | Allow `http` upstreams in header mode (default `false`) |
+| `SHUTDOWN_TIMEOUT` | Graceful shutdown budget; must be > 0 |
 | `AUTH_ENABLED`, `AUTH_MODE`, `PROXY_AUTH_TOKEN`, `PROXY_AUTH_HOST_MAP` | Auth (header mode only) |
 | `PROXY_MODE` | `header` (default) or `route` |
 | `ROUTES` | JSON route array (required when `PROXY_MODE=route`) |
@@ -65,6 +72,7 @@ Host and SNI rule (upstreams are typically Cloudflare-fronted, which rejects SNI
 - An https route with a suffix `host` requires `host_header`; otherwise startup fails.
 - Encoded paths are preserved: `%2F` is not decoded on the way to the upstream, with or without `rewrite_prefix`.
 - `CONNECT` is rejected with `405` / `method_not_allowed` (tunnel mode is tracked in [#23](https://github.com/denisitpro/lux-l7/issues/23)).
+- `X-Forwarded-Proto` is the proxy's own value (`https` when the client connection used TLS, else `http`); a client-sent value is ignored.
 - Auth is not supported in route mode: `AUTH_ENABLED=true` fails at startup. `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES` and `UPSTREAM_DENY_HOSTS` are ignored (startup warning).
 
 ## Planned — cloud native
@@ -76,7 +84,7 @@ Host and SNI rule (upstreams are typically Cloudflare-fronted, which rejects SNI
 
 ## Planned — security
 
-GitHub: [#3](https://github.com/denisitpro/lux-l7/issues/3) — SSRF guard: resolved-IP check at dial time blocks loopback, private, link-local and metadata addresses; port allow-list; trailing-dot host normalisation.
+GitHub: [#3](https://github.com/denisitpro/lux-l7/issues/3) — SSRF guard: resolved-IP check at dial time blocks loopback, private, link-local and metadata addresses; port allow-list.
 
 - Refuse to start with an empty allow-list unless `UPSTREAM_ALLOW_ANY=true` (client tokens are extractable; the allow-list is the real abuse guard). GitHub: [#7](https://github.com/denisitpro/lux-l7/issues/7).
 - Optional client IP forwarding (`X-Forwarded-For`) with trusted-hop handling. GitHub: [#8](https://github.com/denisitpro/lux-l7/issues/8).
