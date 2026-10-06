@@ -69,7 +69,7 @@ Every variable is optional.
 - **Auth:** one variable, `PROXY_AUTH_TOKEN=<token>` (or `PROXY_AUTH_HOST_MAP=<json>` for per-host tokens).
 - **CONNECT tunnel:** two variables, `TUNNEL_ADDR=:8443` and `PROXY_AUTH_TOKEN=<token>`. TLS cert files are recommended, not required. Without a token the tunnel needs `UPSTREAM_ALLOW_HOSTS` or `UPSTREAM_ALLOW_SUFFIXES`.
 
-Legacy `AUTH_ENABLED` and `AUTH_MODE` are ignored except for safety checks, and a startup warning asks to remove them: `AUTH_ENABLED=true` without a token, `AUTH_ENABLED=false` with a token, and an `AUTH_MODE` that contradicts the token variable are startup errors. `AUTH_ENABLED=false` without tokens is valid, so existing deployments keep working. In route mode (no auth) tokens are ignored, and `AUTH_ENABLED=true` is an error.
+Legacy `AUTH_ENABLED` and `AUTH_MODE` are ignored except for safety checks, and a startup warning asks to remove them: `AUTH_ENABLED=true` without a token, `AUTH_ENABLED=false` with a token, and an `AUTH_MODE` that contradicts the token variable are startup errors. `AUTH_ENABLED=false` without tokens is valid, so existing deployments keep working. In route mode (no auth) a set token variable or `AUTH_ENABLED=true` is a startup error.
 
 ### CONNECT tunnel
 
@@ -119,7 +119,7 @@ Host and SNI rule (upstreams are typically Cloudflare-fronted, which rejects SNI
 - Encoded paths are preserved: `%2F` is not decoded on the way to the upstream, with or without `rewrite_prefix`.
 - `CONNECT` is rejected with `405` / `method_not_allowed`; the tunnel listener is header mode only.
 - `X-Forwarded-Proto` is the proxy's own value (`https` when the client connection used TLS, else `http`); a client-sent value is ignored.
-- Auth is not supported in route mode: `AUTH_ENABLED=true` fails at startup. `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES` and `UPSTREAM_DENY_HOSTS` are ignored (startup warning).
+- Auth is not supported in route mode: `AUTH_ENABLED=true`, `PROXY_AUTH_TOKEN` or `PROXY_AUTH_HOST_MAP` fails at startup. `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES` and `UPSTREAM_DENY_HOSTS` are ignored (startup warning).
 
 ## Planned — cloud native
 

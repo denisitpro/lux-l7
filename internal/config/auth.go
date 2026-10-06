@@ -40,9 +40,12 @@ func resolveAuth(cfg *Config, env authEnv) error {
 	explicitOn := env.enabledSet && env.enabled
 
 	if cfg.ProxyMode == ProxyModeRoute {
-		// Route mode has no auth; tokens are ignored unless auth is forced on.
+		// Route mode has no auth: a token would make an operator believe it is protected.
 		if explicitOn {
 			return fmt.Errorf("auth is not supported in route mode: unset AUTH_ENABLED")
+		}
+		if cfg.InstanceToken != "" || cfg.HostTokenJSON != "" {
+			return fmt.Errorf("auth is not supported in route mode: unset PROXY_AUTH_TOKEN / PROXY_AUTH_HOST_MAP")
 		}
 		cfg.AuthEnabled = false
 		return nil

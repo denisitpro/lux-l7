@@ -112,9 +112,17 @@ func TestRouteModeAuth(t *testing.T) {
 	t.Setenv("PROXY_MODE", "route")
 	t.Setenv("ROUTES", routes)
 	t.Setenv("PROXY_AUTH_TOKEN", "x")
-	cfg, err := config.Load()
-	if err != nil || cfg.AuthEnabled {
-		t.Fatalf("route mode ignores tokens: auth=%v err=%v", cfg.AuthEnabled, err)
+	if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "PROXY_AUTH_TOKEN") {
+		t.Fatalf("route mode + token: want startup error, got %v", err)
+	}
+	t.Setenv("PROXY_AUTH_TOKEN", "")
+	t.Setenv("PROXY_AUTH_HOST_MAP", hostMap)
+	if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "PROXY_AUTH_HOST_MAP") {
+		t.Fatalf("route mode + host map: want startup error, got %v", err)
+	}
+	t.Setenv("PROXY_AUTH_HOST_MAP", "")
+	if cfg, err := config.Load(); err != nil || cfg.AuthEnabled {
+		t.Fatalf("route mode without tokens must load: %v", err)
 	}
 	t.Setenv("AUTH_ENABLED", "true")
 	if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "route mode") {
