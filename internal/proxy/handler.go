@@ -82,8 +82,9 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 		h.ports[port] = struct{}{}
 	}
 	rp := &httputil.ReverseProxy{
-		Transport: tr,
-		Rewrite:   h.rewrite,
+		Transport:      tr,
+		Rewrite:        h.rewrite,
+		ModifyResponse: StripOriginMarker,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			ObserveUpstreamError(metrics.From(w), err)
 			WriteUpstreamError(w, err)

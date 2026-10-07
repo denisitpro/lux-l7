@@ -27,6 +27,7 @@ import (
 
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/config"
+	"github.com/denisitpro/lux-l7/internal/headers"
 	"github.com/denisitpro/lux-l7/internal/tunnel"
 )
 
@@ -736,5 +737,22 @@ func TestCapacityZeroIsUnlimited(t *testing.T) {
 	addr, _ := start(t, baseCfg(port)) // TunnelMaxConnections == 0
 	for range 20 {
 		openTunnel(t, addr, target, nil)
+	}
+}
+
+// A tunnel refusal carries the proxy-origin marker; the 200 that opens a tunnel does not.
+func TestOriginMarker(t *testing.T) {
+	_, port := tcpServer(t, echo)
+	target := "127.0.0.1:" + strconv.Itoa(port)
+	addr, _ := start(t, baseCfg(port+1)) // port not allowed
+	denied := expectStatus(t, addr, target, nil, http.StatusForbidden)
+	if denied.Header.Get(headers.ProxyOrigin) != headers.ProxyOriginValue {
+		t.Fatalf("refusal marker = %q", denied.Header.Get(headers.ProxyOrigin))
+	}
+
+	addr, _ = start(t, baseCfg(port))
+	ok := expectStatus(t, addr, target, nil, http.StatusOK)
+	if v := ok.Header.Get(headers.ProxyOrigin); v != "" {
+		t.Fatalf("tunnel 200 carries marker %q", v)
 	}
 }

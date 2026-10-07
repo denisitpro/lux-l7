@@ -1,6 +1,6 @@
 # Capabilities
 
-> Status: living · Last verified: 2026-10-06 · [AI - claude-sonnet-5-5]
+> Status: living · Last verified: 2026-10-07 · [AI - claude-sonnet-5-5]
 
 What lux-l7 does, verified against `cmd/` and `internal/`. One entry per capability: what it does, how to enable it, limits, origin. Wire details live in [`protocol.md`](protocol.md), every env variable in [`configuration.md`](configuration.md). The roadmap is the [`label:feature` issue list](https://github.com/denisitpro/lux-l7/issues?q=is%3Aopen+label%3Afeature).
 
@@ -115,6 +115,13 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 - **Enable:** always on.
 - **Limits:** `GET` only (`HEAD /healthz` is proxied). `/readyz` does not check upstreams. `/version` returns the build id only.
 - **Origin:** probes [#2](https://github.com/denisitpro/lux-l7/pull/2); `/version` [#19](https://github.com/denisitpro/lux-l7/pull/19); GET-only rule [#30](https://github.com/denisitpro/lux-l7/pull/30).
+
+### Proxy-origin marker
+
+- **What:** every proxy-generated error response (header, route and tunnel mode) carries `X-L7-Proxy: 1`, so a client can tell a proxy `403`/`502` from an upstream one. A marker sent by an upstream is removed from the relayed response; upstream responses never carry it.
+- **Enable:** always on, no setting.
+- **Limits:** not set on the probes (`/healthz`, `/readyz`, `/version`) or on the `200 Connection Established` that opens a tunnel. A client cancel gets no response, so no marker.
+- **Origin:** issue [#13](https://github.com/denisitpro/lux-l7/issues/13).
 
 ### Graceful shutdown
 

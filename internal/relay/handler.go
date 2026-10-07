@@ -58,6 +58,7 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				h.rewrite(pr, idx)
 			},
+			ModifyResponse: proxy.StripOriginMarker,
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				// Logging is the request log's job (internal/reqlog), from the observation.
 				proxy.ObserveUpstreamError(metrics.From(w), err)
