@@ -35,6 +35,7 @@ type Handler struct {
 	policy *policy.Policy
 	auth   *auth.Validator
 	proxy  *httputil.ReverseProxy
+	path   bool             // PROXY_MODE=path: the target is the /h/<host> path prefix
 	ports  map[int]struct{} // empty: no port restriction (config.Load always sets a default)
 	log    *slog.Logger
 
@@ -72,6 +73,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 		cfg:    cfg,
 		policy: p,
 		auth:   v,
+		path:   cfg.ProxyMode == config.ProxyModePath,
 		ports:  make(map[int]struct{}, len(cfg.UpstreamAllowPorts)),
 		log:    log,
 	}
@@ -84,6 +86,8 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 	rp := &httputil.ReverseProxy{
 		Transport: tr,
 		Rewrite:   h.rewrite,
+		// Strips an upstream-sent origin marker; path mode also rewrites redirects.
+		ModifyResponse: h.modifyResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			ObserveUpstreamError(metrics.From(w), err)
 			WriteUpstreamError(w, err)
@@ -94,10 +98,23 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 }
 
 func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	w, obs := h.observer.Begin(metrics.ModeHeader, rw, r)
+	mode := metrics.ModeHeader
+	if h.path {
+		mode = metrics.ModePath
+	}
+	w, obs := h.observer.Begin(mode, rw, r)
 	defer obs.Done()
 	obs.Ingress(r.Host)
-	t, err := parseTarget(r, h.cfg.UpstreamScheme, h.cfg.UpstreamAllowHTTP)
+	var (
+		t        target
+		upstream string // path mode: the request path after /h/<host>
+		err      error
+	)
+	if h.path {
+		t, upstream, err = parsePathTarget(r, h.cfg.UpstreamScheme, h.cfg.UpstreamAllowHTTP)
+	} else {
+		t, err = parseTarget(r, h.cfg.UpstreamScheme, h.cfg.UpstreamAllowHTTP)
+	}
 	if err != nil {
 		obs.Reject(metrics.RejectBadTarget)
 		WriteJSON(w, http.StatusBadRequest, "bad_target", err.Error())
@@ -132,6 +149,9 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	r = r.Clone(r.Context())
 	StripRoutingHeaders(r.Header)
+	if h.path {
+		setEscapedPath(r.URL, upstream)
+	}
 
 	ctx := context.WithValue(r.Context(), targetKey, t)
 	h.proxy.ServeHTTP(w, r.WithContext(ctx))
@@ -164,6 +184,9 @@ func (h *Handler) rewrite(pr *httputil.ProxyRequest) {
 	StripRoutingHeaders(pr.Out.Header)
 	// Hops is a route-mode loop guard; header mode never forwards a client value.
 	pr.Out.Header.Del(headers.Hops)
+	if h.cfg.UpstreamForwardClientIP {
+		setForwarded(pr, h.cfg.UpstreamTrustedProxies)
+	}
 }
 
 func parseTarget(r *http.Request, defaultScheme string, allowHTTP bool) (target, error) {
@@ -181,13 +204,18 @@ func parseTarget(r *http.Request, defaultScheme string, allowHTTP bool) (target,
 	if scheme == "http" && !allowHTTP {
 		return target{}, errors.New("http upstream scheme is disabled")
 	}
+	return newTarget(scheme, rawHost, "X-L7-Target-Host")
+}
 
+// newTarget validates rawHost (host or host:port) for scheme; what names the source
+// in the error text.
+func newTarget(scheme, rawHost, what string) (target, error) {
 	host, port, err := policy.SplitAuthority(rawHost)
 	switch {
 	case errors.Is(err, policy.ErrInvalidPort):
-		return target{}, errors.New("invalid X-L7-Target-Host port")
+		return target{}, errors.New("invalid " + what + " port")
 	case err != nil:
-		return target{}, errors.New("invalid X-L7-Target-Host")
+		return target{}, errors.New("invalid " + what)
 	}
 	if port != "" {
 		host = net.JoinHostPort(host, port)

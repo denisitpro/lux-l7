@@ -8,9 +8,9 @@ The tunnel exists only when `TUNNEL_ADDR` is set. Clients keep end-to-end TLS wi
 
 Startup rules for a tunnel (any failure exits at startup):
 
-- header mode only (`TUNNEL_ADDR` with `PROXY_MODE=route` fails);
+- header and path mode only (`TUNNEL_ADDR` with `PROXY_MODE=route` fails);
 - it must be protected: a token variable (`PROXY_AUTH_TOKEN` or `PROXY_AUTH_HOST_MAP`), or at least one of `UPSTREAM_ALLOW_HOSTS` / `UPSTREAM_ALLOW_SUFFIXES`. Otherwise it would be an open relay and startup fails. `UPSTREAM_DENY_HOSTS` alone does not count;
-- host policy, the SSRF guard and the token check are shared with header mode (see [`upstream-policy.md`](upstream-policy.md) and [`modes-and-auth.md`](modes-and-auth.md)); the port list is its own (`TUNNEL_ALLOW_PORTS`);
+- host policy, the SSRF guard and the token check are shared with header and path mode (see [`upstream-policy.md`](upstream-policy.md) and [`modes-and-auth.md`](modes-and-auth.md)); the port list is its own (`TUNNEL_ALLOW_PORTS`);
 - `HTTP_READ_HEADER_TIMEOUT` and `UPSTREAM_TIMEOUT` apply to it too ([`listener.md`](listener.md)).
 
 ## Variables

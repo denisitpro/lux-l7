@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -39,12 +40,13 @@ const (
 	defaultTunnelMaxConns = 300
 )
 
-// ProxyMode selects header-based or static route-table forwarding.
+// ProxyMode selects header-based, path-based or static route-table forwarding.
 type ProxyMode string
 
 const (
 	ProxyModeHeader ProxyMode = "header"
 	ProxyModeRoute  ProxyMode = "route"
+	ProxyModePath   ProxyMode = "path"
 )
 
 // AuthMode selects how proxy tokens are validated.
@@ -72,14 +74,19 @@ type Config struct {
 	UpstreamTimeout  time.Duration
 	UpstreamMaxBytes int64
 	UpstreamScheme   string
-	// UpstreamAllowHTTP permits plain-http upstreams in header mode (default scheme or
-	// X-L7-Target-Scheme). Off by default so a client cannot downgrade the upstream hop.
+	// UpstreamAllowHTTP permits plain-http upstreams in header and path mode (default scheme or,
+	// in header mode, X-L7-Target-Scheme). Off by default so a client cannot downgrade the upstream hop.
 	UpstreamAllowHTTP bool
-	// UpstreamAllowPrivate disables the SSRF guard (header mode and tunnel): loopback, private,
+	// UpstreamAllowPrivate disables the SSRF guard (header mode, path mode and tunnel): loopback, private,
 	// link-local and other non-public resolved IPs become reachable. Local tests only.
 	UpstreamAllowPrivate bool
-	// UpstreamAllowPorts lists the target ports a header-mode client may reach.
+	// UpstreamAllowPorts lists the target ports a header- or path-mode client may reach.
 	UpstreamAllowPorts []int
+	// UpstreamForwardClientIP sends X-Forwarded-For / -Host / -Proto to the header-mode upstream.
+	UpstreamForwardClientIP bool
+	// UpstreamTrustedProxies restricts which connecting addresses may supply inbound
+	// X-Forwarded-* (empty: any peer is trusted).
+	UpstreamTrustedProxies []netip.Prefix
 
 	AllowHosts    []string
 	AllowSuffixes []string
@@ -151,6 +158,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, inEveryMode(err)
 	}
+	forwardClientIP, err := envBool("UPSTREAM_FORWARD_CLIENT_IP", false)
+	if err != nil {
+		return Config{}, inEveryMode(err)
+	}
+	trustedProxies, err := parseTrustedProxies("UPSTREAM_TRUSTED_PROXIES", os.Getenv("UPSTREAM_TRUSTED_PROXIES"))
+	if err != nil {
+		return Config{}, inEveryMode(err)
+	}
 	tunnelPorts, err := parsePorts("TUNNEL_ALLOW_PORTS", envOr("TUNNEL_ALLOW_PORTS", defaultTunnelPorts))
 	if err != nil {
 		return Config{}, inEveryMode(err)
@@ -167,38 +182,40 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		HTTPAddr:             envOr("HTTP_ADDR", defaultHTTPAddr),
-		HTTPTLSCertFile:      strings.TrimSpace(os.Getenv("HTTP_TLS_CERT_FILE")),
-		HTTPTLSKeyFile:       strings.TrimSpace(os.Getenv("HTTP_TLS_KEY_FILE")),
-		HTTPH2C:              h2c,
-		ProxyMode:            mode,
-		RouteMaxHops:         routeMaxHops,
-		ReadHeaderTimeout:    defaultReadHeaderTimeout,
-		ReadTimeout:          defaultReadTimeout,
-		WriteTimeout:         defaultWriteTimeout,
-		IdleTimeout:          defaultIdleTimeout,
-		ShutdownTimeout:      defaultShutdownTimeout,
-		UpstreamTimeout:      defaultUpstreamTimeout,
-		UpstreamMaxBytes:     defaultUpstreamMaxBytes,
-		UpstreamScheme:       strings.ToLower(envOr("UPSTREAM_DEFAULT_SCHEME", defaultUpstreamScheme)),
-		AllowHosts:           splitCSV(envOr("UPSTREAM_ALLOW_HOSTS", "")),
-		AllowSuffixes:        splitCSV(envOr("UPSTREAM_ALLOW_SUFFIXES", "")),
-		DenyHosts:            splitCSV(envOr("UPSTREAM_DENY_HOSTS", "")),
-		UpstreamAllowHTTP:    allowHTTP,
-		UpstreamAllowPrivate: allowPrivate,
-		UpstreamAllowPorts:   ports,
-		AuthMode:             AuthModeInstance,
-		InstanceToken:        strings.TrimSpace(os.Getenv("PROXY_AUTH_TOKEN")),
-		HostTokenJSON:        strings.TrimSpace(os.Getenv("PROXY_AUTH_HOST_MAP")),
-		TunnelAddr:           strings.TrimSpace(os.Getenv("TUNNEL_ADDR")),
-		TunnelAllowPorts:     tunnelPorts,
-		TunnelIdleTimeout:    defaultTunnelIdleTimeout,
-		TunnelMaxConnections: tunnelMaxConns,
-		TunnelTLSCertFile:    strings.TrimSpace(os.Getenv("TUNNEL_TLS_CERT_FILE")),
-		TunnelTLSKeyFile:     strings.TrimSpace(os.Getenv("TUNNEL_TLS_KEY_FILE")),
-		MetricsAddr:          strings.TrimSpace(os.Getenv("METRICS_ADDR")),
-		MetricsLocation:      strings.TrimSpace(os.Getenv("METRICS_LOCATION")),
-		MetricsIngressHosts:  splitCSV(os.Getenv("METRICS_INGRESS_HOSTS")),
+		HTTPAddr:                envOr("HTTP_ADDR", defaultHTTPAddr),
+		HTTPTLSCertFile:         strings.TrimSpace(os.Getenv("HTTP_TLS_CERT_FILE")),
+		HTTPTLSKeyFile:          strings.TrimSpace(os.Getenv("HTTP_TLS_KEY_FILE")),
+		HTTPH2C:                 h2c,
+		ProxyMode:               mode,
+		RouteMaxHops:            routeMaxHops,
+		ReadHeaderTimeout:       defaultReadHeaderTimeout,
+		ReadTimeout:             defaultReadTimeout,
+		WriteTimeout:            defaultWriteTimeout,
+		IdleTimeout:             defaultIdleTimeout,
+		ShutdownTimeout:         defaultShutdownTimeout,
+		UpstreamTimeout:         defaultUpstreamTimeout,
+		UpstreamMaxBytes:        defaultUpstreamMaxBytes,
+		UpstreamScheme:          strings.ToLower(envOr("UPSTREAM_DEFAULT_SCHEME", defaultUpstreamScheme)),
+		AllowHosts:              splitCSV(envOr("UPSTREAM_ALLOW_HOSTS", "")),
+		AllowSuffixes:           splitCSV(envOr("UPSTREAM_ALLOW_SUFFIXES", "")),
+		DenyHosts:               splitCSV(envOr("UPSTREAM_DENY_HOSTS", "")),
+		UpstreamAllowHTTP:       allowHTTP,
+		UpstreamAllowPrivate:    allowPrivate,
+		UpstreamAllowPorts:      ports,
+		UpstreamForwardClientIP: forwardClientIP,
+		UpstreamTrustedProxies:  trustedProxies,
+		AuthMode:                AuthModeInstance,
+		InstanceToken:           strings.TrimSpace(os.Getenv("PROXY_AUTH_TOKEN")),
+		HostTokenJSON:           strings.TrimSpace(os.Getenv("PROXY_AUTH_HOST_MAP")),
+		TunnelAddr:              strings.TrimSpace(os.Getenv("TUNNEL_ADDR")),
+		TunnelAllowPorts:        tunnelPorts,
+		TunnelIdleTimeout:       defaultTunnelIdleTimeout,
+		TunnelMaxConnections:    tunnelMaxConns,
+		TunnelTLSCertFile:       strings.TrimSpace(os.Getenv("TUNNEL_TLS_CERT_FILE")),
+		TunnelTLSKeyFile:        strings.TrimSpace(os.Getenv("TUNNEL_TLS_KEY_FILE")),
+		MetricsAddr:             strings.TrimSpace(os.Getenv("METRICS_ADDR")),
+		MetricsLocation:         strings.TrimSpace(os.Getenv("METRICS_LOCATION")),
+		MetricsIngressHosts:     splitCSV(os.Getenv("METRICS_INGRESS_HOSTS")),
 	}
 
 	level, err := parseLevel(envOr("LOG_LEVEL", defaultLogLevel))
@@ -307,16 +324,16 @@ func validate(cfg *Config, routesRaw string) error {
 		return fmt.Errorf("TUNNEL_IDLE_TIMEOUT must be > 0, got %s", cfg.TunnelIdleTimeout)
 	}
 	switch cfg.ProxyMode {
-	case ProxyModeHeader, ProxyModeRoute:
+	case ProxyModeHeader, ProxyModeRoute, ProxyModePath:
 	default:
-		return fmt.Errorf("PROXY_MODE must be header or route, got %q", cfg.ProxyMode)
+		return fmt.Errorf("PROXY_MODE must be header, route or path, got %q", cfg.ProxyMode)
 	}
 	if cfg.RouteMaxHops < 1 {
 		return inEveryMode(fmt.Errorf("ROUTE_MAX_HOPS must be >= 1, got %d", cfg.RouteMaxHops))
 	}
-	if cfg.ProxyMode == ProxyModeHeader {
+	if cfg.ProxyMode != ProxyModeRoute {
 		if routesRaw != "" {
-			return fmt.Errorf("ROUTES must not be set when PROXY_MODE=header")
+			return fmt.Errorf("ROUTES must not be set when PROXY_MODE=%s", cfg.ProxyMode)
 		}
 	} else {
 		if routesRaw == "" {
@@ -334,7 +351,7 @@ func validate(cfg *Config, routesRaw string) error {
 	default:
 		return inEveryMode(fmt.Errorf("UPSTREAM_DEFAULT_SCHEME must be http or https, got %q", cfg.UpstreamScheme))
 	}
-	if cfg.ProxyMode == ProxyModeHeader {
+	if cfg.ProxyMode != ProxyModeRoute {
 		if cfg.UpstreamScheme == "http" && !cfg.UpstreamAllowHTTP {
 			return fmt.Errorf("UPSTREAM_DEFAULT_SCHEME=http requires UPSTREAM_ALLOW_HTTP=true")
 		}
@@ -380,14 +397,20 @@ func (c Config) Warnings() []string {
 	if c.ProxyMode == ProxyModeRoute && (len(c.AllowHosts) > 0 || len(c.AllowSuffixes) > 0 || len(c.DenyHosts) > 0) {
 		w = append(w, "UPSTREAM_ALLOW_HOSTS, UPSTREAM_ALLOW_SUFFIXES and UPSTREAM_DENY_HOSTS are ignored in route mode")
 	}
-	if c.ProxyMode == ProxyModeHeader && len(c.AllowHosts) == 0 && len(c.AllowSuffixes) == 0 {
+	if c.ProxyMode != ProxyModeRoute && len(c.AllowHosts) == 0 && len(c.AllowSuffixes) == 0 {
 		w = append(w, "upstream allow-list empty: any host may be targeted unless UPSTREAM_DENY_HOSTS blocks it")
 	}
-	if c.UpstreamAllowPrivate && (c.ProxyMode == ProxyModeHeader || c.TunnelAddr != "") {
+	if c.UpstreamAllowPrivate && (c.ProxyMode != ProxyModeRoute || c.TunnelAddr != "") {
 		w = append(w, "UPSTREAM_ALLOW_PRIVATE=true: SSRF guard off, loopback, private and metadata upstreams are reachable")
 	}
 	if c.HTTPH2C && c.HTTPTLSCertFile != "" {
 		w = append(w, "HTTP_H2C is ignored while HTTP_TLS_CERT_FILE is set: HTTP/2 is already negotiated through TLS")
+	}
+	if len(c.UpstreamTrustedProxies) > 0 && !c.UpstreamForwardClientIP {
+		w = append(w, "UPSTREAM_TRUSTED_PROXIES has no effect while UPSTREAM_FORWARD_CLIENT_IP is false")
+	}
+	if c.ProxyMode == ProxyModeRoute && (c.UpstreamForwardClientIP || len(c.UpstreamTrustedProxies) > 0) {
+		w = append(w, "UPSTREAM_FORWARD_CLIENT_IP and UPSTREAM_TRUSTED_PROXIES are ignored in route mode: it always sets X-Forwarded-*")
 	}
 	if c.MetricsAddr == "" && (c.MetricsLocation != "" || len(c.MetricsIngressHosts) > 0) {
 		w = append(w, "METRICS_LOCATION and METRICS_INGRESS_HOSTS have no effect while METRICS_ADDR is empty")
@@ -465,6 +488,29 @@ func parsePorts(name, raw string) ([]int, error) {
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("%s: no ports", name)
+	}
+	return out, nil
+}
+
+// parseTrustedProxies reads a comma-separated list of IPs and CIDRs (IPv4 and IPv6);
+// a bare IP is a single-host prefix. Empty yields no entries.
+func parseTrustedProxies(name, raw string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, e := range splitCSV(raw) {
+		var p netip.Prefix
+		if strings.Contains(e, "/") {
+			var err error
+			if p, err = netip.ParsePrefix(e); err != nil {
+				return nil, fmt.Errorf("%s: invalid CIDR %q", name, e)
+			}
+		} else {
+			a, err := netip.ParseAddr(e)
+			if err != nil {
+				return nil, fmt.Errorf("%s: invalid IP or CIDR %q", name, e)
+			}
+			p = netip.PrefixFrom(a, a.BitLen())
+		}
+		out = append(out, p.Masked())
 	}
 	return out, nil
 }

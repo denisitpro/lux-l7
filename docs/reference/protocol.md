@@ -1,8 +1,20 @@
 # Client protocol
 
-> Status: living · Last verified: 2026-10-06 · [AI - claude-sonnet-5-5]
+> Status: living · Last verified: 2026-10-07 · [AI - claude-sonnet-5-5]
 
 What a client sends and what the proxy answers, per mode. What each feature does and how to enable it: [`capabilities.md`](capabilities.md). Env variables: [`configuration.md`](configuration.md).
+
+## Protocol version and compatibility
+
+This document describes **protocol version 1**. The version is a property of this document, not of the wire: the proxy does not advertise it in any response (`GET /version` returns the build id only).
+
+Rules within a version:
+
+- Changes are **additive only**: new optional request headers, new response headers, new fields in the JSON error body, new error codes, new modes.
+- Clients must **ignore** response headers and JSON fields they do not know, and must treat an unknown `error` code like any other error with the same HTTP status class (decide on the status, log the code).
+- Existing headers, fields, codes and statuses keep their meaning; checks may get stricter only where the proxy previously forwarded something unsafe.
+
+A breaking change (removed or renamed header, changed meaning, changed status for an existing code) starts protocol version 2. It is announced in this document first, ships beside the old behavior behind an explicit opt-in (a new request header or env switch), and the old behavior is removed only after a deprecation period. No client has to change on upgrade within version 1.
 
 ## Error body
 
@@ -12,11 +24,40 @@ Every proxy-generated refusal is JSON with `Content-Type: application/json`:
 {"error":"bad_target","detail":"missing X-L7-Target-Host"}
 ```
 
-`error` is a stable code, `detail` a human sentence. Upstream responses are passed through untouched. The `405` on the tunnel's wrong method also sets `Allow: CONNECT`.
+`error` is a stable code, `detail` a human sentence (its wording is not a contract). Upstream responses are passed through untouched. The `405` on the tunnel's wrong method also sets `Allow: CONNECT`.
+
+### Telling a proxy error from an upstream error
+
+Every proxy-generated error response carries `X-L7-Proxy: 1`. Upstream responses never do: the proxy removes the header if an upstream sends it. A `403` or `502` with the header was written by the proxy; without it, the upstream wrote it.
+
+It is set on all error envelopes in header, route and tunnel mode. It is **not** set on the probes (`/healthz`, `/readyz`, `/version`) or on the `200 Connection Established` that opens a tunnel. Tunnel clients see it on the refusal response to `CONNECT`.
+
+## Error codes
+
+The single authoritative list. A Go test fails when a code the handlers emit is missing here, or a code listed here is never emitted. Per-mode check order is in the mode sections below.
+
+| `error` | Status | Modes | Meaning |
+|---|---|---|---|
+| `bad_target` | 400 | header, path, tunnel | Target host, port or scheme is missing or malformed, or `http` is disabled. |
+| `unauthorized` | 401 | header, path | Missing or invalid `X-L7-Proxy-Token`. |
+| `proxy_auth_required` | 407 | tunnel | Missing or invalid `Proxy-Authorization` (sets `Proxy-Authenticate`). |
+| `forbidden` | 403 | header, path, route, tunnel | Host not allowed, port not allowed, or the resolved upstream address is not public. |
+| `no_route` | 404 | route | No route matches host and path. |
+| `method_not_allowed` | 405 | route, tunnel | Route mode: `CONNECT`. Tunnel: anything except `CONNECT` (sets `Allow: CONNECT`). |
+| `body_too_large` | 413 | header, path, route | Request body above `UPSTREAM_MAX_BYTES`. |
+| `bad_hops` | 400 | route | `X-L7-Hops` is not an integer `>= 0`. |
+| `loop_detected` | 508 | route | Incoming hops `>= ROUTE_MAX_HOPS`. |
+| `upstream_timeout` | 504 | header, path, route, tunnel | Upstream dial or response timed out. |
+| `bad_gateway` | 502 | header, path, route, tunnel | Any other upstream dial or transport failure. |
+| `shutting_down` | 503 | tunnel | The proxy is draining. |
+| `tunnel_capacity` | 503 | tunnel | `TUNNEL_MAX_CONNECTIONS` reached (sets `Retry-After: 1`). |
+| `internal` | 500 | tunnel | The connection cannot be hijacked. |
+
+A client that cancels gets no response.
 
 ## Probes (all modes)
 
-`GET /healthz` and `GET /readyz` return `200` with body `ok`. `GET /version` returns `{"version":"<build id>"}`. Served locally, no headers needed, never proxied. Any other method or path goes to the mode handler.
+`GET /healthz` and `GET /readyz` return `200` with body `ok`. `GET /version` returns `{"version":"<build id>"}`. Served locally, no headers needed, never proxied. Any other method or path goes to the mode handler (in path mode only `/h/...` is accepted).
 
 ## Header mode
 
@@ -44,6 +85,21 @@ Checks run in this order; the first failure answers:
 | 8 | Dial or round trip: other failure | `502 bad_gateway` | `upstream request failed` |
 
 Notes: the host is lowercased and one trailing dot is dropped before policy, auth and dial. The token is checked before policy and port, so an unauthenticated client gets `401` whatever it targets and cannot probe the allow list or the port list. A client that cancels gets no response.
+
+## Path mode
+
+For clients that cannot set headers. The target is the first path segment after `/h/`:
+
+```
+GET /h/api.example.com/v1/items?limit=5 HTTP/1.1
+X-L7-Proxy-Token: <token>          (only when auth is on)
+```
+
+is forwarded as `GET https://api.example.com/v1/items?limit=5`. Form: `/h/<host>[:port]/<path>?<query>`; IPv6 in brackets (`/h/[2001:db8::1]:443/x`). The scheme is `UPSTREAM_DEFAULT_SCHEME`; there is no per-request scheme. `X-L7-Target-Host`, `X-L7-Target-Scheme` and `X-L7-Proxy-Token` are ignored for routing and removed before the upstream. The token is read from the header only, never from path or query. Path and query go on verbatim (`%2F` stays encoded); an empty path (`/h/api.example.com`) is `/`. The outgoing `Host` is the target authority.
+
+Checks and status codes are those of header mode, in the same order. Check 1 differs: `400 bad_target` with `detail` `path must start with /h/<host>`, `missing target host in path`, `invalid target host in path` (also for a percent-encoded host), `invalid target host in path port`, or `http upstream scheme is disabled`.
+
+Response rewriting: a `Location` or `Content-Location` value that is an absolute URL to the target (same scheme, host and effective port; host compared case-insensitively), a `//host/...` URL to it, or an absolute path (`/x`) becomes `/h/<host>[:port]/...` (query and fragment kept). Other hosts, other schemes, URLs with userinfo and relative values (`x`, `?q`) are untouched. `Set-Cookie` and response bodies are not rewritten ([#51](https://github.com/denisitpro/lux-l7/issues/51)).
 
 ## CONNECT tunnel
 

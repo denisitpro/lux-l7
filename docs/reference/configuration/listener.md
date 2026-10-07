@@ -107,7 +107,7 @@ services:
 - **What:** the minimum level written to the JSON log on stdout. It is the only logging setting: the proxy mode decides what each level emits.
 - **Values:** `debug`, `info`, `warn` (or `warning`), `error`; case-insensitive.
 - **Default:** `info`.
-- **Change it when:** `debug` for troubleshooting (one line per request, which in header mode and tunnel includes the target host); `warn` to quiet a busy deployment. Keep `info` in production: in header mode and tunnel it logs no request data at all, in route mode one summary line per route per minute.
+- **Change it when:** `debug` for troubleshooting (one line per request, which in header mode, path mode and tunnel includes the target host); `warn` to quiet a busy deployment. Keep `info` in production: in header mode, path mode and tunnel it logs no request data at all, in route mode one summary line per route per minute.
 - **Example:** `LOG_LEVEL=warn`
 - **If wrong:** any other value fails startup (`unknown LOG_LEVEL`).
 

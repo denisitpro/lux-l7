@@ -23,6 +23,7 @@ import (
 	"github.com/denisitpro/lux-l7/internal/certs"
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/egress"
+	"github.com/denisitpro/lux-l7/internal/headers"
 	"github.com/denisitpro/lux-l7/internal/metrics"
 	"github.com/denisitpro/lux-l7/internal/policy"
 	"github.com/denisitpro/lux-l7/internal/proxy"
@@ -255,7 +256,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !s.track(client, up) {
 		obs.Reject(metrics.RejectShuttingDown)
 		obs.SetStatus(http.StatusServiceUnavailable)
-		_, _ = client.Write([]byte("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"))
+		_, _ = client.Write([]byte("HTTP/1.1 503 Service Unavailable\r\n" + headers.ProxyOrigin + ": " + headers.ProxyOriginValue + "\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"))
 		_ = client.Close()
 		_ = up.Close()
 		return

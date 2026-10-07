@@ -30,9 +30,9 @@ Metrics are off by default and nothing is recorded while off. `/metrics` is serv
 
 ### `METRICS_INGRESS_HOSTS`
 
-- **What:** in header mode, the front hostnames allowed to appear as the `ingress_host` label (the `Host` header clients used to reach the proxy). Any other `Host` is counted as `other`, which keeps the number of series bounded no matter what clients send.
+- **What:** in header and path mode, the front hostnames allowed to appear as the `ingress_host` label (the `Host` header clients used to reach the proxy). Any other `Host` is counted as `other`, which keeps the number of series bounded no matter what clients send.
 - **Values:** comma-separated bare hostnames, lowercased automatically, no ports: `front.example.com,front2.example.com`.
 - **Default:** empty (every request is `other`).
-- **Change it when:** several front hostnames reach one header-mode instance and you want per-front numbers. Each entry adds label values, so list only the hosts you really use.
+- **Change it when:** several front hostnames reach one header- or path-mode instance and you want per-front numbers. Each entry adds label values, so list only the hosts you really use.
 - **Example:** `METRICS_INGRESS_HOSTS=front.example.com`
 - **If wrong:** an entry with a port or invalid characters fails startup. In route mode it is ignored with a warning, because labels come from the `host` field of `ROUTES`. Without `METRICS_ADDR` it is ignored with a warning. The tunnel always reports `other`.
