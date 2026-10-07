@@ -38,17 +38,17 @@ The single authoritative list. A Go test fails when a code the handlers emit is 
 
 | `error` | Status | Modes | Meaning |
 |---|---|---|---|
-| `bad_target` | 400 | header, tunnel | Target host, port or scheme is missing or malformed, or `http` is disabled. |
-| `unauthorized` | 401 | header | Missing or invalid `X-L7-Proxy-Token`. |
+| `bad_target` | 400 | header, path, tunnel | Target host, port or scheme is missing or malformed, or `http` is disabled. |
+| `unauthorized` | 401 | header, path | Missing or invalid `X-L7-Proxy-Token`. |
 | `proxy_auth_required` | 407 | tunnel | Missing or invalid `Proxy-Authorization` (sets `Proxy-Authenticate`). |
-| `forbidden` | 403 | header, route, tunnel | Host not allowed, port not allowed, or the resolved upstream address is not public. |
+| `forbidden` | 403 | header, path, route, tunnel | Host not allowed, port not allowed, or the resolved upstream address is not public. |
 | `no_route` | 404 | route | No route matches host and path. |
 | `method_not_allowed` | 405 | route, tunnel | Route mode: `CONNECT`. Tunnel: anything except `CONNECT` (sets `Allow: CONNECT`). |
-| `body_too_large` | 413 | header, route | Request body above `UPSTREAM_MAX_BYTES`. |
+| `body_too_large` | 413 | header, path, route | Request body above `UPSTREAM_MAX_BYTES`. |
 | `bad_hops` | 400 | route | `X-L7-Hops` is not an integer `>= 0`. |
 | `loop_detected` | 508 | route | Incoming hops `>= ROUTE_MAX_HOPS`. |
-| `upstream_timeout` | 504 | header, route, tunnel | Upstream dial or response timed out. |
-| `bad_gateway` | 502 | header, route, tunnel | Any other upstream dial or transport failure. |
+| `upstream_timeout` | 504 | header, path, route, tunnel | Upstream dial or response timed out. |
+| `bad_gateway` | 502 | header, path, route, tunnel | Any other upstream dial or transport failure. |
 | `shutting_down` | 503 | tunnel | The proxy is draining. |
 | `tunnel_capacity` | 503 | tunnel | `TUNNEL_MAX_CONNECTIONS` reached (sets `Retry-After: 1`). |
 | `internal` | 500 | tunnel | The connection cannot be hijacked. |
@@ -57,7 +57,7 @@ A client that cancels gets no response.
 
 ## Probes (all modes)
 
-`GET /healthz` and `GET /readyz` return `200` with body `ok`. `GET /version` returns `{"version":"<build id>"}`. Served locally, no headers needed, never proxied. Any other method or path goes to the mode handler.
+`GET /healthz` and `GET /readyz` return `200` with body `ok`. `GET /version` returns `{"version":"<build id>"}`. Served locally, no headers needed, never proxied. Any other method or path goes to the mode handler (in path mode only `/h/...` is accepted).
 
 ## Header mode
 
@@ -85,6 +85,21 @@ Checks run in this order; the first failure answers:
 | 8 | Dial or round trip: other failure | `502 bad_gateway` | `upstream request failed` |
 
 Notes: the host is lowercased and one trailing dot is dropped before policy, auth and dial. The token is checked before policy and port, so an unauthenticated client gets `401` whatever it targets and cannot probe the allow list or the port list. A client that cancels gets no response.
+
+## Path mode
+
+For clients that cannot set headers. The target is the first path segment after `/h/`:
+
+```
+GET /h/api.example.com/v1/items?limit=5 HTTP/1.1
+X-L7-Proxy-Token: <token>          (only when auth is on)
+```
+
+is forwarded as `GET https://api.example.com/v1/items?limit=5`. Form: `/h/<host>[:port]/<path>?<query>`; IPv6 in brackets (`/h/[2001:db8::1]:443/x`). The scheme is `UPSTREAM_DEFAULT_SCHEME`; there is no per-request scheme. `X-L7-Target-Host`, `X-L7-Target-Scheme` and `X-L7-Proxy-Token` are ignored for routing and removed before the upstream. The token is read from the header only, never from path or query. Path and query go on verbatim (`%2F` stays encoded); an empty path (`/h/api.example.com`) is `/`. The outgoing `Host` is the target authority.
+
+Checks and status codes are those of header mode, in the same order. Check 1 differs: `400 bad_target` with `detail` `path must start with /h/<host>`, `missing target host in path`, `invalid target host in path` (also for a percent-encoded host), `invalid target host in path port`, or `http upstream scheme is disabled`.
+
+Response rewriting: a `Location` or `Content-Location` value that is an absolute URL to the target (same scheme, host and effective port; host compared case-insensitively), a `//host/...` URL to it, or an absolute path (`/x`) becomes `/h/<host>[:port]/...` (query and fragment kept). Other hosts, other schemes, URLs with userinfo and relative values (`x`, `?q`) are untouched. `Set-Cookie` and response bodies are not rewritten ([#51](https://github.com/denisitpro/lux-l7/issues/51)).
 
 ## CONNECT tunnel
 

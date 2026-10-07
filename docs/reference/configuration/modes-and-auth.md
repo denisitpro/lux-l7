@@ -8,19 +8,20 @@ Which way the proxy picks the upstream, and who may use it. Part of the [configu
 
 ### `PROXY_MODE`
 
-- **What:** selects how the upstream is chosen. `header`: the client names it per request in `X-L7-Target-Host`. `route`: a static table (`ROUTES`) maps the incoming host and path to an upstream, and clients send ordinary requests.
-- **Values:** `header` or `route`; case-insensitive.
+- **What:** selects how the upstream is chosen. `header`: the client names it per request in `X-L7-Target-Host`. `path`: the client puts it in the URL, `/h/<host>[:port]/<path>`, for clients that cannot set headers. `route`: a static table (`ROUTES`) maps the incoming host and path to an upstream, and clients send ordinary requests.
+- **Values:** `header`, `path` or `route`; case-insensitive.
 - **Default:** `header`.
-- **Change it when:** you want a fixed hostname/path to origin mapping instead of client-chosen targets. See [`routes.md`](routes.md).
-- **Example:** `PROXY_MODE=route`
-- **If wrong:** any other value fails startup. Combinations that fail startup: `ROUTES` set in header mode; `ROUTES` missing in route mode; a token variable in route mode; `TUNNEL_ADDR` in route mode.
+- **Change it when:** `path` if clients cannot send `X-L7-Target-Host`; `route` for a fixed hostname/path to origin mapping instead of client-chosen targets (see [`routes.md`](routes.md)).
+- **Example:** `PROXY_MODE=path` or `PROXY_MODE=route`
+- **If wrong:** any other value fails startup. Combinations that fail startup: `ROUTES` set in header or path mode; `ROUTES` missing in route mode; a token variable in route mode; `TUNNEL_ADDR` in route mode.
+- **Path mode:** everything header mode does (token in `X-L7-Proxy-Token`, host policy, SSRF guard, port allow-list, body limit, tunnel, `UPSTREAM_*` variables), except that the target is the first path segment and the scheme is always `UPSTREAM_DEFAULT_SCHEME` (`X-L7-Target-*` are ignored and stripped). Redirect `Location` headers to the target are rewritten back to `/h/<host>/...`; `Set-Cookie` is not ([#51](https://github.com/denisitpro/lux-l7/issues/51)). The token never goes in the path or query: a client that cannot set headers runs without auth and relies on the allow list. Wire form: [`../protocol.md`](../protocol.md#path-mode).
 - **Route mode drops:** auth, the tunnel, the SSRF guard and the port allow-list; the allow and deny lists are ignored with a startup warning. Upstreams there are operator-written, so they are trusted.
 
 ## Authentication
 
-Auth is off unless a token variable is set; there is no separate on/off switch. The variable you set chooses the model. Auth applies to header mode and the tunnel, never to route mode.
+Auth is off unless a token variable is set; there is no separate on/off switch. The variable you set chooses the model. Auth applies to header mode, path mode and the tunnel, never to route mode.
 
-A client presents the token as `X-L7-Proxy-Token` in header mode, or as the password of `Proxy-Authorization: Basic` on the tunnel (the user part is ignored). The token is checked before the host policy and port, so an unauthenticated client cannot probe the allow list.
+A client presents the token as `X-L7-Proxy-Token` in header or path mode, or as the password of `Proxy-Authorization: Basic` on the tunnel (the user part is ignored). The token is checked before the host policy and port, so an unauthenticated client cannot probe the allow list.
 
 Generate each token with `openssl rand -hex 32` (64 hex characters). Treat tokens as secrets: keep them in a secret store, never in git. Only SHA-256 hashes are kept in memory, and startup logs the token count but never values. Revoking a token means removing it and redeploying.
 

@@ -71,7 +71,7 @@ func main() {
 		logger.Info("proxy mode", "mode", "route", "routes", len(cfg.Routes))
 		appHandler = relay.New(cfg, cfg.Routes, logger, relay.Options{Observer: observer})
 	default:
-		logger.Info("proxy mode", "mode", "header")
+		logger.Info("proxy mode", "mode", string(cfg.ProxyMode))
 		authValidator, err = auth.New(cfg)
 		if err != nil {
 			logger.Error("auth", "err", err)
@@ -83,7 +83,7 @@ func main() {
 		appHandler = proxy.New(cfg, authValidator, logger, proxy.WithObserver(observer))
 	}
 
-	if cfg.ProxyMode == config.ProxyModeHeader && !cfg.AuthEnabled {
+	if cfg.ProxyMode != config.ProxyModeRoute && !cfg.AuthEnabled {
 		logger.Warn("auth disabled: do not expose this configuration on the public internet")
 	}
 

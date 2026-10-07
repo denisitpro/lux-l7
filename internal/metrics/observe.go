@@ -15,6 +15,7 @@ type Mode string
 const (
 	ModeHeader Mode = "header"
 	ModeRoute  Mode = "route"
+	ModePath   Mode = "path"
 	ModeTunnel Mode = "tunnel"
 )
 
