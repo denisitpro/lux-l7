@@ -11,8 +11,10 @@ import (
 	"github.com/denisitpro/lux-l7/internal/headers"
 )
 
-// WriteJSON writes a JSON error body in the standard proxy shape.
+// WriteJSON writes a JSON error body in the standard proxy shape and marks the
+// response as proxy-generated (headers.ProxyOrigin).
 func WriteJSON(w http.ResponseWriter, status int, code, detail string) {
+	w.Header().Set(headers.ProxyOrigin, headers.ProxyOriginValue)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": code, "detail": detail})
@@ -35,6 +37,13 @@ func StripRoutingHeaders(h http.Header) {
 	h.Del(headers.TargetHost)
 	h.Del(headers.TargetScheme)
 	h.Del(headers.ProxyToken)
+}
+
+// StripOriginMarker removes a proxy-origin marker the upstream sent, so the marker on a
+// response always means the proxy wrote it. Use it as ReverseProxy.ModifyResponse.
+func StripOriginMarker(resp *http.Response) error {
+	resp.Header.Del(headers.ProxyOrigin)
+	return nil
 }
 
 // WriteUpstreamError answers a failed upstream round trip. A client cancel gets no
