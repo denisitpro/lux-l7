@@ -680,3 +680,28 @@ func TestWebSocketUpgradeThroughRelay(t *testing.T) {
 		t.Fatalf("echo %q err=%v", got, err)
 	}
 }
+
+// The proxy-origin marker is on proxy-generated errors and never on an upstream
+// response, even when the upstream sends the header itself.
+func TestOriginMarker(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(headers.ProxyOrigin, headers.ProxyOriginValue) // spoof
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(up.Close)
+	routes := mustRoutes(t, `[{"host":"example.com","path_prefix":"/only","upstream":"`+upstreamURL(up)+`"}]`)
+	srv := httptest.NewServer(relay.New(testCfg(), routes, nil, relay.Options{}))
+	t.Cleanup(srv.Close)
+
+	own := doGet(t, srv.URL+"/nope", "example.com") // no route
+	if own.StatusCode != http.StatusNotFound || own.Header.Get(headers.ProxyOrigin) != headers.ProxyOriginValue {
+		t.Fatalf("proxy error: status=%d marker=%q", own.StatusCode, own.Header.Get(headers.ProxyOrigin))
+	}
+	fwd := doGet(t, srv.URL+"/only", "example.com")
+	if fwd.StatusCode != http.StatusForbidden {
+		t.Fatalf("upstream status=%d", fwd.StatusCode)
+	}
+	if v := fwd.Header.Get(headers.ProxyOrigin); v != "" {
+		t.Fatalf("upstream response carries marker %q", v)
+	}
+}

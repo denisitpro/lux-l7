@@ -86,8 +86,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 	rp := &httputil.ReverseProxy{
 		Transport: tr,
 		Rewrite:   h.rewrite,
-		// Only path mode rewrites responses: header-mode clients name the target
-		// themselves and keep the URL they asked for.
+		// Strips an upstream-sent origin marker; path mode also rewrites redirects.
 		ModifyResponse: h.modifyResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			ObserveUpstreamError(metrics.From(w), err)

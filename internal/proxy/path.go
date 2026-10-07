@@ -49,8 +49,11 @@ func setEscapedPath(u *url.URL, escaped string) {
 	u.Path, u.RawPath = p, escaped
 }
 
-// modifyResponse points redirects at the target back through the proxy (path mode).
+// modifyResponse strips an upstream-sent origin marker and, in path mode, points
+// redirects at the target back through the proxy. Header-mode clients name the
+// target themselves and keep the URL they asked for.
 func (h *Handler) modifyResponse(resp *http.Response) error {
+	_ = StripOriginMarker(resp)
 	if !h.path {
 		return nil
 	}
