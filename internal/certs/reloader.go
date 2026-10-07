@@ -1,4 +1,4 @@
-package tunnel
+package certs
 
 import (
 	"crypto/tls"
@@ -9,10 +9,11 @@ import (
 	"time"
 )
 
-// certReloader serves a certificate pair from disk and reloads it when either file's
+// Reloader serves a certificate pair from disk and reloads it when either file's
 // mtime changes (cert-manager rotations need no restart). A failed reload keeps the
 // previous certificate in service.
-type certReloader struct {
+type Reloader struct {
+	name              string // log and error prefix, e.g. "tunnel tls"
 	certFile, keyFile string
 	log               *slog.Logger
 
@@ -22,34 +23,36 @@ type certReloader struct {
 	keyMod  time.Time
 }
 
-func newCertReloader(certFile, keyFile string, log *slog.Logger) (*certReloader, error) {
-	r := &certReloader{certFile: certFile, keyFile: keyFile, log: log}
+// NewReloader loads the pair once, so an unreadable or mismatched pair fails the caller
+// at startup. name prefixes errors and log lines (e.g. "tunnel tls").
+func NewReloader(name, certFile, keyFile string, log *slog.Logger) (*Reloader, error) {
+	r := &Reloader{name: name, certFile: certFile, keyFile: keyFile, log: log}
 	certMod, keyMod, err := r.mtimes()
 	if err != nil {
 		return nil, err
 	}
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("tunnel tls: %w", err)
+		return nil, fmt.Errorf("%s: %w", r.name, err)
 	}
 	r.cert, r.certMod, r.keyMod = &cert, certMod, keyMod
 	return r, nil
 }
 
-func (r *certReloader) mtimes() (cert, key time.Time, err error) {
+func (r *Reloader) mtimes() (cert, key time.Time, err error) {
 	ci, err := os.Stat(r.certFile)
 	if err != nil {
-		return cert, key, fmt.Errorf("tunnel tls: %w", err)
+		return cert, key, fmt.Errorf("%s: %w", r.name, err)
 	}
 	ki, err := os.Stat(r.keyFile)
 	if err != nil {
-		return cert, key, fmt.Errorf("tunnel tls: %w", err)
+		return cert, key, fmt.Errorf("%s: %w", r.name, err)
 	}
 	return ci.ModTime(), ki.ModTime(), nil
 }
 
 // GetCertificate implements tls.Config.GetCertificate.
-func (r *certReloader) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (r *Reloader) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	certMod, keyMod, err := r.mtimes()
@@ -60,10 +63,10 @@ func (r *certReloader) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, e
 	r.certMod, r.keyMod = certMod, keyMod
 	cert, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
 	if err != nil {
-		r.log.Warn("tunnel tls reload failed, keeping the previous certificate", "err", err)
+		r.log.Warn(r.name+" reload failed, keeping the previous certificate", "err", err)
 		return r.cert, nil
 	}
 	r.cert = &cert
-	r.log.Info("tunnel tls certificate reloaded")
+	r.log.Info(r.name + " certificate reloaded")
 	return r.cert, nil
 }

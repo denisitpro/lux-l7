@@ -4,7 +4,7 @@
 
 How the main HTTP listener behaves, how the process stops, and how it logs. Part of the [configuration guide](../configuration.md); the common value rules (durations, booleans) are there.
 
-The main listener speaks plain HTTP/1.x. There is no TLS option on it: end TLS at an ingress or load balancer in front. (The tunnel listener has its own TLS, see [`tunnel.md`](tunnel.md).)
+The main listener speaks plain HTTP/1.x by default: end TLS at an ingress or load balancer in front. Without an ingress it can terminate TLS itself (`HTTP_TLS_*`, HTTP/2 through ALPN) or accept cleartext HTTP/2 (`HTTP_H2C`). The tunnel listener has its own TLS, see [`tunnel.md`](tunnel.md).
 
 ## Listener
 
@@ -16,6 +16,42 @@ The main listener speaks plain HTTP/1.x. There is no TLS option on it: end TLS a
 - **Change it when:** the port is taken, or you want to bind to loopback only behind a local sidecar.
 - **Example:** `HTTP_ADDR=127.0.0.1:8080`
 - **If wrong:** the value itself is not checked while loading config: a malformed or busy address makes the process fail when it starts listening. Two listeners on one socket fail startup: `TUNNEL_ADDR` or `METRICS_ADDR` clashing with it is rejected (the clash rule is in [`../configuration.md`](../configuration.md#combinations-that-fail-startup); see also [`tunnel.md`](tunnel.md) and [`metrics.md`](metrics.md)).
+
+### `HTTP_TLS_CERT_FILE`, `HTTP_TLS_KEY_FILE`
+
+- **What:** a PEM certificate and key that turn the main listener into a TLS listener (TLS 1.2 or higher). ALPN offers `h2` and `http/1.1`, so HTTP/2 clients get HTTP/2 and others fall back to HTTP/1.1. Works in every proxy mode; `/healthz`, `/readyz` and `/version` are served over TLS too.
+- **Values:** file paths, both set or both empty. The certificate file may contain the full chain. A self-signed certificate works (clients must trust it).
+- **Default:** empty (plain HTTP/1.1 listener, as before).
+- **Change it when:** the proxy runs without an ingress or load balancer that ends TLS, i.e. on its own published port.
+- **Example:** `HTTP_TLS_CERT_FILE=/etc/lux-l7/tls.crt` and `HTTP_TLS_KEY_FILE=/etc/lux-l7/tls.key`
+- **If wrong:** only one of the two set fails startup; an unreadable or mismatching pair fails startup. The files are re-read when either one's modification time changes (checked at the next handshake), so a renewed certificate needs no restart; if a reload fails, the previous certificate is kept and a warning is logged. Same behaviour as `TUNNEL_TLS_*`; the tunnel pair is separate and can differ.
+- **WebSocket:** `net/http` does not serve WebSocket over HTTP/2 (RFC 8441 extended `CONNECT`), so WebSocket clients must use HTTP/1.1 (the usual `Upgrade` handshake over the same TLS port; browsers and common libraries do this by default). Requests that arrive over HTTP/2 are proxied to the upstream as before; SSE and streaming work over both.
+- **Deployment without ingress:** publish the port directly, for example in Docker Compose:
+
+```yaml
+services:
+  lux-l7:
+    image: your-registry.example/lux-l7:latest
+    ports:
+      - "443:8443"
+    environment:
+      HTTP_ADDR: ":8443"
+      HTTP_TLS_CERT_FILE: /certs/tls.crt
+      HTTP_TLS_KEY_FILE: /certs/tls.key
+    volumes:
+      - ./certs:/certs:ro
+```
+
+  Built-in certificate issuance (ACME) and HTTP/3 are not part of this option.
+
+### `HTTP_H2C`
+
+- **What:** accepts cleartext HTTP/2 with prior knowledge (the client opens the connection speaking HTTP/2, no upgrade) on the main listener, next to HTTP/1.1 on the same port.
+- **Values:** boolean, `true` or `false`.
+- **Default:** `false`: a prior-knowledge HTTP/2 client is refused, HTTP/1.1 is unchanged.
+- **Change it when:** a trusted hop in front (a sidecar, a gRPC-style client or an internal load balancer) speaks h2c to the proxy over a private network. Cleartext: never on an untrusted network.
+- **Example:** `HTTP_H2C=true`
+- **If wrong:** an unparsable value fails startup. Set together with `HTTP_TLS_CERT_FILE` it is ignored with a startup warning (TLS already offers HTTP/2, and the TLS port carries no cleartext). The `Upgrade: h2c` handshake is not supported, only prior knowledge. WebSocket over HTTP/2 is not supported (see above).
 
 ### `HTTP_READ_HEADER_TIMEOUT`
 
