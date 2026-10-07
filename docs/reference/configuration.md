@@ -15,7 +15,7 @@ Nothing is required to start. With no variables the service listens on `:8080` i
 - **Lists** are comma-separated; items are trimmed and lowercased, empty items dropped.
 - **Ports** in port lists are integers from `1` to `65535`.
 - **JSON values** (`ROUTES`, `PROXY_AUTH_HOST_MAP`) go on one line.
-- **Fail fast.** An invalid value or an unsafe combination exits the process at startup with a message naming the variable. Mode-specific variables (`UPSTREAM_ALLOW_PORTS`, `TUNNEL_ALLOW_PORTS`, `UPSTREAM_ALLOW_HTTP`, `UPSTREAM_ALLOW_PRIVATE`, `UPSTREAM_DEFAULT_SCHEME`, `ROUTE_MAX_HOPS`) are checked in every mode, so a typo fails even where the variable has no effect; their errors end with `(checked in every PROXY_MODE, ...)`. Softer problems are logged once as warnings after startup (see [`configuration/listener.md`](configuration/listener.md#log_level)).
+- **Fail fast.** An invalid value or an unsafe combination exits the process at startup with a message naming the variable. Mode-specific variables (`UPSTREAM_ALLOW_PORTS`, `TUNNEL_ALLOW_PORTS`, `UPSTREAM_ALLOW_HTTP`, `UPSTREAM_ALLOW_PRIVATE`, `UPSTREAM_FORWARD_CLIENT_IP`, `UPSTREAM_TRUSTED_PROXIES`, `UPSTREAM_DEFAULT_SCHEME`, `ROUTE_MAX_HOPS`) are checked in every mode, so a typo fails even where the variable has no effect; their errors end with `(checked in every PROXY_MODE, ...)`. Softer problems are logged once as warnings after startup (see [`configuration/listener.md`](configuration/listener.md#log_level)).
 - **No hot reload.** Change a variable, restart the process. The only exception is the tunnel TLS certificate pair.
 
 ## Recipes
@@ -101,6 +101,8 @@ Every variable the code reads. "Mode" says where it has an effect: both, header 
 | `UPSTREAM_DEFAULT_SCHEME` | `https` | Scheme when the client names none (header) | [upstream-policy](configuration/upstream-policy.md#upstream_default_scheme) |
 | `UPSTREAM_ALLOW_HTTP` | `false` | Permit plain-http upstreams (header) | [upstream-policy](configuration/upstream-policy.md#upstream_allow_http) |
 | `UPSTREAM_ALLOW_PRIVATE` | `false` | `true` disables the SSRF guard (header, tunnel) | [upstream-policy](configuration/upstream-policy.md#upstream_allow_private) |
+| `UPSTREAM_FORWARD_CLIENT_IP` | `false` | Send `X-Forwarded-For/Host/Proto` to the upstream (header) | [upstream-policy](configuration/upstream-policy.md#upstream_forward_client_ip) |
+| `UPSTREAM_TRUSTED_PROXIES` | empty | IPs/CIDRs allowed to supply inbound `X-Forwarded-*`; empty trusts all (header) | [upstream-policy](configuration/upstream-policy.md#upstream_trusted_proxies) |
 | `UPSTREAM_ALLOW_PORTS` | `80,443,8443,9443` | Reachable target ports (header) | [upstream-policy](configuration/upstream-policy.md#upstream_allow_ports) |
 | `UPSTREAM_ALLOW_HOSTS` | empty | Exact hostnames admitted (header, tunnel) | [upstream-policy](configuration/upstream-policy.md#upstream_allow_hosts) |
 | `UPSTREAM_ALLOW_SUFFIXES` | empty | Domain suffixes admitted (header, tunnel) | [upstream-policy](configuration/upstream-policy.md#upstream_allow_suffixes) |
@@ -135,4 +137,4 @@ Every variable the code reads. "Mode" says where it has an effect: both, header 
 **Socket clash rule.** Two listen addresses clash when the ports are equal and the hosts are equal or either one is a wildcard (empty, `0.0.0.0` or `::`): `:8080`, `0.0.0.0:8080`, `[::]:8080` and `127.0.0.1:8080` all clash with each other, `127.0.0.1:8080` and `127.0.0.2:8080` do not. Hostnames are not resolved, so `localhost:8080` and `127.0.0.1:8080` are not compared; the second bind then fails when listening starts. An unparsable address is left to the listener to reject.
 
 
-Warnings only (logged at startup, the process runs): empty allow list in header mode, auth off in header mode, host lists set in route mode (ignored), `UPSTREAM_ALLOW_PRIVATE=true` (header mode or tunnel), a tunnel without TLS, `METRICS_LOCATION` or `METRICS_INGRESS_HOSTS` without `METRICS_ADDR`, `METRICS_INGRESS_HOSTS` in route mode, the removed `AUTH_*` variables, and a route `tls_server_name` that differs from the outgoing `Host`.
+Warnings only (logged at startup, the process runs): empty allow list in header mode, auth off in header mode, host lists set in route mode (ignored), `UPSTREAM_ALLOW_PRIVATE=true` (header mode or tunnel), a tunnel without TLS, `METRICS_LOCATION` or `METRICS_INGRESS_HOSTS` without `METRICS_ADDR`, `METRICS_INGRESS_HOSTS` in route mode, `UPSTREAM_TRUSTED_PROXIES` without `UPSTREAM_FORWARD_CLIENT_IP`, either of the two in route mode (ignored), the removed `AUTH_*` variables, and a route `tls_server_name` that differs from the outgoing `Host`.
