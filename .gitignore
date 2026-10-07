@@ -19,3 +19,4 @@ data/
 # Editor
 .idea/
 .vscode/
+.claude/
