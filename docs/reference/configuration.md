@@ -69,6 +69,18 @@ TUNNEL_TLS_KEY_FILE=/etc/lux-l7/tls.key
 
 Expose the tunnel port at L4 (LoadBalancer or TLS passthrough). Details: [`configuration/tunnel.md`](configuration/tunnel.md).
 
+### Main listener with TLS, no ingress
+
+Terminate TLS in the proxy itself (HTTP/2 and HTTP/1.1 through ALPN) and publish the port directly:
+
+```sh
+HTTP_ADDR=:8443
+HTTP_TLS_CERT_FILE=/etc/lux-l7/tls.crt
+HTTP_TLS_KEY_FILE=/etc/lux-l7/tls.key
+```
+
+Details and a compose example: [`configuration/listener.md`](configuration/listener.md#http_tls_cert_file-http_tls_key_file).
+
 ### Metrics
 
 ```sh
@@ -90,6 +102,8 @@ Every variable the code reads. "Mode" says where it has an effect: both, header 
 | `PROXY_AUTH_HOST_MAP` | unset | JSON map of target host to token (header, tunnel) | [modes-and-auth](configuration/modes-and-auth.md#proxy_auth_host_map) |
 | `AUTH_ENABLED`, `AUTH_MODE` | removed | Ignored with a startup warning | [modes-and-auth](configuration/modes-and-auth.md#auth_enabled-auth_mode-removed) |
 | `HTTP_ADDR` | `:8080` | Main listener address | [listener](configuration/listener.md#http_addr) |
+| `HTTP_TLS_CERT_FILE`, `HTTP_TLS_KEY_FILE` | empty | PEM pair enabling TLS (HTTP/2 via ALPN) on the main listener | [listener](configuration/listener.md#http_tls_cert_file-http_tls_key_file) |
+| `HTTP_H2C` | `false` | Accept cleartext HTTP/2 (prior knowledge) on the main listener when TLS is off | [listener](configuration/listener.md#http_h2c) |
 | `HTTP_READ_HEADER_TIMEOUT` | `5s` | Time allowed to send request headers (also tunnel) | [listener](configuration/listener.md#http_read_header_timeout) |
 | `HTTP_READ_TIMEOUT` | `0` (off) | Cap on reading a whole request; cuts streams if set | [listener](configuration/listener.md#http_read_timeout) |
 | `HTTP_WRITE_TIMEOUT` | `0` (off) | Cap on writing a whole response; cuts streams if set | [listener](configuration/listener.md#http_write_timeout) |
@@ -125,6 +139,7 @@ Every variable the code reads. "Mode" says where it has an effect: both, header 
 | `TUNNEL_ADDR` with `PROXY_MODE=route` | route mode has no tunnel |
 | `TUNNEL_ADDR` with no token and no allow list | open relay refused |
 | one `TUNNEL_TLS_*` file without the other | both or neither |
+| one `HTTP_TLS_*` file without the other, or an unreadable or mismatching pair | both or neither, and a loadable pair |
 | `ROUTES` with `PROXY_MODE=header`, or missing in route mode | `ROUTES` belongs to route mode only |
 | `UPSTREAM_DEFAULT_SCHEME=http` without `UPSTREAM_ALLOW_HTTP=true` | header mode refuses a silent downgrade |
 | a host list entry with a port (header mode) | lists hold bare hostnames |
@@ -135,4 +150,4 @@ Every variable the code reads. "Mode" says where it has an effect: both, header 
 **Socket clash rule.** Two listen addresses clash when the ports are equal and the hosts are equal or either one is a wildcard (empty, `0.0.0.0` or `::`): `:8080`, `0.0.0.0:8080`, `[::]:8080` and `127.0.0.1:8080` all clash with each other, `127.0.0.1:8080` and `127.0.0.2:8080` do not. Hostnames are not resolved, so `localhost:8080` and `127.0.0.1:8080` are not compared; the second bind then fails when listening starts. An unparsable address is left to the listener to reject.
 
 
-Warnings only (logged at startup, the process runs): empty allow list in header mode, auth off in header mode, host lists set in route mode (ignored), `UPSTREAM_ALLOW_PRIVATE=true` (header mode or tunnel), a tunnel without TLS, `METRICS_LOCATION` or `METRICS_INGRESS_HOSTS` without `METRICS_ADDR`, `METRICS_INGRESS_HOSTS` in route mode, the removed `AUTH_*` variables, and a route `tls_server_name` that differs from the outgoing `Host`.
+Warnings only (logged at startup, the process runs): empty allow list in header mode, auth off in header mode, host lists set in route mode (ignored), `UPSTREAM_ALLOW_PRIVATE=true` (header mode or tunnel), a tunnel without TLS, `HTTP_H2C=true` together with `HTTP_TLS_CERT_FILE` (the flag is ignored: TLS already offers HTTP/2), `METRICS_LOCATION` or `METRICS_INGRESS_HOSTS` without `METRICS_ADDR`, `METRICS_INGRESS_HOSTS` in route mode, the removed `AUTH_*` variables, and a route `tls_server_name` that differs from the outgoing `Host`.

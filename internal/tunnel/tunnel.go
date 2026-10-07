@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/denisitpro/lux-l7/internal/auth"
+	"github.com/denisitpro/lux-l7/internal/certs"
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/egress"
 	"github.com/denisitpro/lux-l7/internal/metrics"
@@ -97,7 +98,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 
 	switch {
 	case cfg.TunnelTLSCertFile != "" && cfg.TunnelTLSKeyFile != "":
-		r, err := newCertReloader(cfg.TunnelTLSCertFile, cfg.TunnelTLSKeyFile, log)
+		r, err := certs.NewReloader("tunnel tls", cfg.TunnelTLSCertFile, cfg.TunnelTLSKeyFile, log)
 		if err != nil {
 			return nil, err
 		}

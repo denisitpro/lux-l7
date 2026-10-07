@@ -14,6 +14,7 @@ import (
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/front"
+	"github.com/denisitpro/lux-l7/internal/listener"
 	"github.com/denisitpro/lux-l7/internal/metrics"
 	"github.com/denisitpro/lux-l7/internal/proxy"
 	"github.com/denisitpro/lux-l7/internal/relay"
@@ -87,17 +88,14 @@ func main() {
 		logger.Warn("auth disabled: do not expose this configuration on the public internet")
 	}
 
-	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           front.New(appHandler),
-		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
-		ReadTimeout:       cfg.ReadTimeout,
-		WriteTimeout:      cfg.WriteTimeout,
-		IdleTimeout:       cfg.IdleTimeout,
+	srv, err := listener.New(cfg, front.New(appHandler), logger)
+	if err != nil {
+		logger.Error("listener", "err", err)
+		os.Exit(1)
 	}
 
 	go func() {
-		logger.Info("listening", "addr", cfg.HTTPAddr)
+		logger.Info("listening", "addr", cfg.HTTPAddr, "tls", cfg.HTTPTLSCertFile != "", "h2c", cfg.HTTPH2C && cfg.HTTPTLSCertFile == "")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("listen", "err", err)
 			os.Exit(1)

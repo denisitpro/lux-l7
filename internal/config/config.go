@@ -94,6 +94,14 @@ type Config struct {
 	// environment; Warnings reports them. Their values are never read.
 	IgnoredAuthVars []string
 
+	// HTTPTLSCertFile and HTTPTLSKeyFile enable TLS (with HTTP/2 via ALPN) on the main
+	// listener (both or neither).
+	HTTPTLSCertFile string
+	HTTPTLSKeyFile  string
+	// HTTPH2C accepts cleartext HTTP/2 with prior knowledge on the main listener when
+	// TLS is off.
+	HTTPH2C bool
+
 	// TunnelAddr is the CONNECT tunnel listen address; empty disables the tunnel.
 	TunnelAddr string
 	// TunnelAllowPorts lists the target ports a CONNECT client may reach.
@@ -153,8 +161,16 @@ func Load() (Config, error) {
 		return Config{}, inEveryMode(err)
 	}
 
+	h2c, err := envBool("HTTP_H2C", false)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		HTTPAddr:             envOr("HTTP_ADDR", defaultHTTPAddr),
+		HTTPTLSCertFile:      strings.TrimSpace(os.Getenv("HTTP_TLS_CERT_FILE")),
+		HTTPTLSKeyFile:       strings.TrimSpace(os.Getenv("HTTP_TLS_KEY_FILE")),
+		HTTPH2C:              h2c,
 		ProxyMode:            mode,
 		RouteMaxHops:         routeMaxHops,
 		ReadHeaderTimeout:    defaultReadHeaderTimeout,
@@ -284,6 +300,9 @@ func validate(cfg *Config, routesRaw string) error {
 	if cfg.WriteTimeout < 0 {
 		return fmt.Errorf("HTTP_WRITE_TIMEOUT must be >= 0, got %s", cfg.WriteTimeout)
 	}
+	if (cfg.HTTPTLSCertFile == "") != (cfg.HTTPTLSKeyFile == "") {
+		return fmt.Errorf("HTTP_TLS_CERT_FILE and HTTP_TLS_KEY_FILE must be set together")
+	}
 	if cfg.TunnelIdleTimeout <= 0 {
 		return fmt.Errorf("TUNNEL_IDLE_TIMEOUT must be > 0, got %s", cfg.TunnelIdleTimeout)
 	}
@@ -366,6 +385,9 @@ func (c Config) Warnings() []string {
 	}
 	if c.UpstreamAllowPrivate && (c.ProxyMode == ProxyModeHeader || c.TunnelAddr != "") {
 		w = append(w, "UPSTREAM_ALLOW_PRIVATE=true: SSRF guard off, loopback, private and metadata upstreams are reachable")
+	}
+	if c.HTTPH2C && c.HTTPTLSCertFile != "" {
+		w = append(w, "HTTP_H2C is ignored while HTTP_TLS_CERT_FILE is set: HTTP/2 is already negotiated through TLS")
 	}
 	if c.MetricsAddr == "" && (c.MetricsLocation != "" || len(c.MetricsIngressHosts) > 0) {
 		w = append(w, "METRICS_LOCATION and METRICS_INGRESS_HOSTS have no effect while METRICS_ADDR is empty")
