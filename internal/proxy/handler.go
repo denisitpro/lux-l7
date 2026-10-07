@@ -164,6 +164,9 @@ func (h *Handler) rewrite(pr *httputil.ProxyRequest) {
 	StripRoutingHeaders(pr.Out.Header)
 	// Hops is a route-mode loop guard; header mode never forwards a client value.
 	pr.Out.Header.Del(headers.Hops)
+	if h.cfg.UpstreamForwardClientIP {
+		setForwarded(pr, h.cfg.UpstreamTrustedProxies)
+	}
 }
 
 func parseTarget(r *http.Request, defaultScheme string, allowHTTP bool) (target, error) {
