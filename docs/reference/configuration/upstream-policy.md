@@ -75,6 +75,28 @@ In route mode the three host lists are ignored (startup warning), and `UPSTREAM_
 - **Example:** `UPSTREAM_ALLOW_HTTP=true`
 - **If wrong:** an unparsable boolean fails startup.
 
+## Client IP forwarding
+
+Header mode only. In route mode both variables are ignored (startup warning): route mode always sets `X-Forwarded-*` itself. Both are parsed in every mode, so a typo fails startup.
+
+### `UPSTREAM_FORWARD_CLIENT_IP`
+
+- **What:** sends `X-Forwarded-For`, `X-Forwarded-Host` and `X-Forwarded-Proto` to the upstream. Off: none of the three reaches the upstream, including client-sent ones. On: the connecting address is appended to the inbound `X-Forwarded-For` chain; `X-Forwarded-Host` is the incoming `Host` and `X-Forwarded-Proto` is `https` only when the client connection used TLS. Inbound `X-Forwarded-*` from the client is trusted by default (the way ingress controllers do it): the inbound chain is kept and extended, an inbound `X-Forwarded-Host` and a valid inbound `X-Forwarded-Proto` (`http` or `https`) replace the proxy's own values.
+- **Values:** boolean.
+- **Default:** `false` (the proxy stays opaque).
+- **Change it when:** the upstream needs the real client address (rate limits, audit, geo).
+- **Example:** `UPSTREAM_FORWARD_CLIENT_IP=true`
+- **If wrong:** an unparsable boolean fails startup. With the default trust, a client that talks to the proxy directly can forge `X-Forwarded-For` entries (the proxy's appended address is still the real one); set `UPSTREAM_TRUSTED_PROXIES` if the upstream reads the chain.
+
+### `UPSTREAM_TRUSTED_PROXIES`
+
+- **What:** restricts who may supply inbound `X-Forwarded-*`. When set, inbound values are honoured only if the connecting address is in the list; otherwise they are dropped and the chain starts at the connecting address. The connecting address is the direct TCP peer, so behind a load balancer list the load balancer's address range.
+- **Values:** comma-separated IPs and CIDRs, IPv4 and IPv6 (`10.0.0.0/8,192.0.2.7,2001:db8::/32`). A bare IP is a single host.
+- **Default:** empty (every peer is trusted).
+- **Change it when:** clients can reach the proxy directly and the upstream trusts the `X-Forwarded-For` chain.
+- **Example:** `UPSTREAM_TRUSTED_PROXIES=10.0.0.0/8,2001:db8::/32`
+- **If wrong:** an entry that is not an IP or CIDR fails startup, naming the variable. Set without `UPSTREAM_FORWARD_CLIENT_IP=true` it logs a startup warning and does nothing.
+
 ## Limits
 
 ### `UPSTREAM_TIMEOUT`

@@ -16,8 +16,8 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 - **What:** forwards a request to the upstream named by `X-L7-Target-Host` (optional `X-L7-Target-Scheme`). Request path and query pass through verbatim, the outgoing `Host` is the target authority.
 - **Enable:** default (`PROXY_MODE=header`), no other variable required.
-- **Limits:** request checks run in a fixed order, see [`protocol.md`](protocol.md). Upstream response codes and bodies are passed through unchanged. `X-Forwarded-*` headers are not added; the code never calls `SetXForwarded` in this mode.
-- **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2), hardened in [#30](https://github.com/denisitpro/lux-l7/pull/30).
+- **Limits:** request checks run in a fixed order, see [`protocol.md`](protocol.md). Upstream response codes and bodies are passed through unchanged. `X-Forwarded-*` headers are not sent to the upstream by default (client-sent ones are dropped too). `UPSTREAM_FORWARD_CLIENT_IP=true` sends `X-Forwarded-For` (inbound chain, trusted by default, plus the connecting address), `X-Forwarded-Host` and `X-Forwarded-Proto`; `UPSTREAM_TRUSTED_PROXIES` (IPs/CIDRs, IPv4 and IPv6) limits whose inbound values are honoured, see [`configuration/upstream-policy.md`](configuration/upstream-policy.md).
+- **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2), hardened in [#30](https://github.com/denisitpro/lux-l7/pull/30); client IP forwarding [#8](https://github.com/denisitpro/lux-l7/issues/8).
 
 ### CONNECT tunnel
 
