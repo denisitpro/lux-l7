@@ -16,7 +16,7 @@ Every proxy-generated refusal is JSON with `Content-Type: application/json`:
 
 ## Probes (all modes)
 
-`GET /healthz` and `GET /readyz` return `200` with body `ok`. `GET /version` returns `{"version":"<build id>"}`. Served locally, no headers needed, never proxied. Any other method or path goes to the mode handler.
+`GET /healthz` and `GET /readyz` return `200` with body `ok`. `GET /version` returns `{"version":"<build id>"}`. Served locally, no headers needed, never proxied. Any other method or path goes to the mode handler (in path mode only `/h/...` is accepted).
 
 ## Header mode
 
@@ -44,6 +44,21 @@ Checks run in this order; the first failure answers:
 | 8 | Dial or round trip: other failure | `502 bad_gateway` | `upstream request failed` |
 
 Notes: the host is lowercased and one trailing dot is dropped before policy, auth and dial. The token is checked before policy and port, so an unauthenticated client gets `401` whatever it targets and cannot probe the allow list or the port list. A client that cancels gets no response.
+
+## Path mode
+
+For clients that cannot set headers. The target is the first path segment after `/h/`:
+
+```
+GET /h/api.example.com/v1/items?limit=5 HTTP/1.1
+X-L7-Proxy-Token: <token>          (only when auth is on)
+```
+
+is forwarded as `GET https://api.example.com/v1/items?limit=5`. Form: `/h/<host>[:port]/<path>?<query>`; IPv6 in brackets (`/h/[2001:db8::1]:443/x`). The scheme is `UPSTREAM_DEFAULT_SCHEME`; there is no per-request scheme. `X-L7-Target-Host`, `X-L7-Target-Scheme` and `X-L7-Proxy-Token` are ignored for routing and removed before the upstream. The token is read from the header only, never from path or query. Path and query go on verbatim (`%2F` stays encoded); an empty path (`/h/api.example.com`) is `/`. The outgoing `Host` is the target authority.
+
+Checks and status codes are those of header mode, in the same order. Check 1 differs: `400 bad_target` with `detail` `path must start with /h/<host>`, `missing target host in path`, `invalid target host in path` (also for a percent-encoded host), `invalid target host in path port`, or `http upstream scheme is disabled`.
+
+Response rewriting: a `Location` or `Content-Location` value that is an absolute URL to the target (same scheme, host and effective port; host compared case-insensitively), a `//host/...` URL to it, or an absolute path (`/x`) becomes `/h/<host>[:port]/...` (query and fragment kept). Other hosts, other schemes, URLs with userinfo and relative values (`x`, `?q`) are untouched. `Set-Cookie` and response bodies are not rewritten ([#51](https://github.com/denisitpro/lux-l7/issues/51)).
 
 ## CONNECT tunnel
 

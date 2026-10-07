@@ -2,7 +2,7 @@
 // outcomes into JSON log lines on the standard LOG_LEVEL. There is no mode switch
 // beyond the level; the proxy mode decides what each level emits.
 //
-// Header mode and tunnel (the log is a leak risk, the client names the target):
+// Header mode, path mode and tunnel (the log is a leak risk, the client names the target):
 //   - info: nothing per request. Never client IP, path, query, target host or token.
 //   - warn, error: upstream failures as a reason only, deduplicated: the first
 //     occurrence is logged at once, repeats are counted into one line per interval.

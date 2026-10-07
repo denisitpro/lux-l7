@@ -10,7 +10,7 @@ Origin links point at the merged PR. Capabilities from the first PR have no fine
 
 ## Modes
 
-One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of header mode.
+One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of header and path mode.
 
 ### Header mode
 
@@ -19,11 +19,18 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 - **Limits:** request checks run in a fixed order, see [`protocol.md`](protocol.md). Upstream response codes and bodies are passed through unchanged. `X-Forwarded-*` headers are not sent to the upstream by default (client-sent ones are dropped too). `UPSTREAM_FORWARD_CLIENT_IP=true` sends `X-Forwarded-For` (inbound chain, trusted by default, plus the connecting address), `X-Forwarded-Host` and `X-Forwarded-Proto`; `UPSTREAM_TRUSTED_PROXIES` (IPs/CIDRs, IPv4 and IPv6) limits whose inbound values are honoured, see [`configuration/upstream-policy.md`](configuration/upstream-policy.md).
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2), hardened in [#30](https://github.com/denisitpro/lux-l7/pull/30); client IP forwarding [#8](https://github.com/denisitpro/lux-l7/issues/8).
 
+### Path mode
+
+- **What:** the target is the first path segment: `/h/<host>[:port]/<path>?<query>` is forwarded to `<scheme>://<host>[:port]/<path>?<query>`, for clients that cannot set headers (a browser, a tool that only takes a base URL). The scheme is always `UPSTREAM_DEFAULT_SCHEME`; `X-L7-Target-Host` and `X-L7-Target-Scheme` are ignored and stripped. An empty path (`/h/api.example.com`) is `/`; path and query pass verbatim, `%2F` included; an IPv6 literal is bracketed (`/h/[2001:db8::1]:443/x`). `Location` and `Content-Location` response headers that point at the target (absolute URL with the same scheme and host[:port], or an absolute path) are rewritten to `/h/<host>/...`, so a redirect stays behind the proxy; other hosts and relative values are untouched.
+- **Enable:** `PROXY_MODE=path`. Auth, host policy, SSRF guard, port allow-list, body limit, error codes and request log are the header-mode ones, in the same order ([`protocol.md`](protocol.md)); only the target source differs. A bad target is `400 bad_target`.
+- **Limits:** the token stays in `X-L7-Proxy-Token`, never in path or query (it would reach access logs); a client that cannot set headers runs with auth off and relies on the allow list. `Set-Cookie` is not rewritten, so cookies set by the target apply to the proxy origin ([#51](https://github.com/denisitpro/lux-l7/issues/51)); HTML bodies are not rewritten, so absolute links inside pages bypass the proxy. A percent-encoded host segment is refused. `ROUTES` must not be set. The tunnel and `X-Forwarded-*` (`UPSTREAM_FORWARD_CLIENT_IP`, `UPSTREAM_TRUSTED_PROXIES`) work as in header mode. Metrics and the request log label it `mode="path"`.
+- **Origin:** [#9](https://github.com/denisitpro/lux-l7/issues/9).
+
 ### CONNECT tunnel
 
 - **What:** a second listener that accepts only `CONNECT host:port`, dials the target and relays raw TCP both ways. TLS runs between the client and the target, so the proxy never sees headers, bodies, API keys or signatures; it sees only the target host:port.
-- **Enable:** `TUNNEL_ADDR` plus a token (`PROXY_AUTH_TOKEN`) or an allow-list (`UPSTREAM_ALLOW_HOSTS` / `UPSTREAM_ALLOW_SUFFIXES`). Startup fails without either, and with `PROXY_MODE=route`.
-- **Limits:** needs an L4 exposure (LoadBalancer Service or TLS passthrough); an L7 ingress cannot carry `CONNECT`. Target ports come from `TUNNEL_ALLOW_PORTS` (default `443`; exchange WebSocket ports 8443 and 9443 must be added explicitly). Credentials are `Proxy-Authorization: Basic base64(user:token)`; the user part is ignored. A refused `CONNECT` (407, 400, 403, 405, 5xx) answers with `Connection: close` and the connection is closed; `HTTP_IDLE_TIMEOUT` also bounds any keep-alive wait on the tunnel listener ([#57](https://github.com/denisitpro/lux-l7/issues/57)). No rate limit and no cap on concurrent tunnels exist in the code. Host policy, the SSRF guard and the token validator are shared with header mode. Idle, shutdown and TLS behaviour: see the Operations entries below and [`protocol.md`](protocol.md).
+- **Enable:** `TUNNEL_ADDR` plus a token (`PROXY_AUTH_TOKEN`) or an allow-list (`UPSTREAM_ALLOW_HOSTS` / `UPSTREAM_ALLOW_SUFFIXES`). Startup fails without either, and with `PROXY_MODE=route` (header and path mode both work).
+- **Limits:** needs an L4 exposure (LoadBalancer Service or TLS passthrough); an L7 ingress cannot carry `CONNECT`. Target ports come from `TUNNEL_ALLOW_PORTS` (default `443`; exchange WebSocket ports 8443 and 9443 must be added explicitly). Credentials are `Proxy-Authorization: Basic base64(user:token)`; the user part is ignored. A refused `CONNECT` (407, 400, 403, 405, 5xx) answers with `Connection: close` and the connection is closed; `HTTP_IDLE_TIMEOUT` also bounds any keep-alive wait on the tunnel listener ([#57](https://github.com/denisitpro/lux-l7/issues/57)). No rate limit and no cap on concurrent tunnels exist in the code. Host policy, the SSRF guard and the token validator are shared with header and path mode. Idle, shutdown and TLS behaviour: see the Operations entries below and [`protocol.md`](protocol.md).
 - **Origin:** [#32](https://github.com/denisitpro/lux-l7/pull/32) (issue [#23](https://github.com/denisitpro/lux-l7/issues/23)).
 
 ### Route mode
@@ -37,29 +44,29 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 ### Auth tokens
 
-- **What:** clients prove access with a token: `X-L7-Proxy-Token` in header mode, the Basic password in the tunnel. Two models. `instance`: one or several shared tokens (`PROXY_AUTH_TOKEN=tok-a,tok-b`, comma-separated, whitespace trimmed, empty items and duplicates dropped); a request passes if its token matches any entry. `per_host`: a JSON map host to token (`PROXY_AUTH_HOST_MAP`), keyed by the bare target host (port ignored, lowercased, exact match, no suffixes).
+- **What:** clients prove access with a token: `X-L7-Proxy-Token` in header and path mode, the Basic password in the tunnel. Two models. `instance`: one or several shared tokens (`PROXY_AUTH_TOKEN=tok-a,tok-b`, comma-separated, whitespace trimmed, empty items and duplicates dropped); a request passes if its token matches any entry. `per_host`: a JSON map host to token (`PROXY_AUTH_HOST_MAP`), keyed by the bare target host (port ignored, lowercased, exact match, no suffixes).
 - **Enable:** auth is off unless a token variable is set; the variable chosen picks the model. Both set is a startup error. There is no other switch: the removed `AUTH_ENABLED` / `AUTH_MODE` are ignored with a startup warning that states the actual auth state.
-- **Limits:** header mode and tunnel only; route mode has no auth. Only SHA-256 hashes are kept; the presented token is hashed once and compared in constant time against every stored hash with no early exit. Startup logs the token count, never values. A token cannot contain a comma. Capacity is bounded by the 128 KiB single-env-string limit on Linux and 1 MiB per Kubernetes Secret (about two thousand 64-character tokens). Order: the token is checked before host policy and port (`401` in header mode, `407` in the tunnel), so an unauthenticated client cannot probe the allow list or ports through `403`. With auth off, startup logs a warning not to expose it publicly. Revoking a token means removing it and redeploying.
+- **Limits:** header mode, path mode and tunnel; route mode has no auth. Only SHA-256 hashes are kept; the presented token is hashed once and compared in constant time against every stored hash with no early exit. Startup logs the token count, never values. A token cannot contain a comma. Capacity is bounded by the 128 KiB single-env-string limit on Linux and 1 MiB per Kubernetes Secret (about two thousand 64-character tokens). Order: the token is checked before host policy and port (`401` in header and path mode, `407` in the tunnel), so an unauthenticated client cannot probe the allow list or ports through `403`. With auth off, startup logs a warning not to expose it publicly. Revoking a token means removing it and redeploying.
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); multiple tokens [#34](https://github.com/denisitpro/lux-l7/pull/34); inferred from tokens [#38](https://github.com/denisitpro/lux-l7/pull/38); token-first order [#40](https://github.com/denisitpro/lux-l7/issues/40); `AUTH_ENABLED` / `AUTH_MODE` removed [#41](https://github.com/denisitpro/lux-l7/issues/41).
 
 ### Upstream policy
 
 - **What:** allow and deny lists on the target hostname. Deny wins. A non-empty allow list (hosts or suffixes) admits only matching names; with both allow lists empty every host is admitted unless denied. A suffix entry matches the apex and all subdomains (`example.com` and `.example.com` behave the same). Deny entries are exact hosts.
 - **Enable:** `UPSTREAM_ALLOW_HOSTS`, `UPSTREAM_ALLOW_SUFFIXES`, `UPSTREAM_DENY_HOSTS` (all optional).
-- **Limits:** header mode and tunnel. Bare hostnames only: an entry with a port fails startup. An empty allow list logs a startup warning in header mode. One trailing dot is dropped from target and entries, so `localhost.` cannot bypass a deny of `localhost`.
+- **Limits:** header mode, path mode and tunnel. Bare hostnames only: an entry with a port fails startup. An empty allow list logs a startup warning in header and path mode. One trailing dot is dropped from target and entries, so `localhost.` cannot bypass a deny of `localhost`.
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); trailing dot and port-entry rules [#30](https://github.com/denisitpro/lux-l7/pull/30).
 
 ### SSRF guard
 
 - **What:** the resolved IP is checked at dial time (`net.Dialer.Control`), so a name that resolves or rebinds to an internal address is refused as a literal one would be. Blocked: unspecified and `0.0.0.0/8`, loopback, RFC 1918, CGNAT, link-local (including the metadata address), `192.0.0.0/24`, benchmarking, reserved `240.0.0.0/4`, multicast, IPv6 unique-local, link-local and local-use NAT64 `64:ff9b:1::/48`. IPv4-mapped IPv6 is checked as IPv4; `64:ff9b::/96` (NAT64), `2002::/16` (6to4) and the deprecated IPv4-compatible `::/96` are judged by the embedded IPv4 ([#60](https://github.com/denisitpro/lux-l7/issues/60)). A blocked dial is `403 forbidden` "upstream address not allowed".
-- **Enable:** always on in header mode and the tunnel. `UPSTREAM_ALLOW_PRIVATE=true` turns it off (startup warning; local tests only).
-- **Limits:** not applied in route mode. The header-mode transport ignores `HTTP_PROXY` so the guard sees the real target.
+- **Enable:** always on in header mode, path mode and the tunnel. `UPSTREAM_ALLOW_PRIVATE=true` turns it off (startup warning; local tests only).
+- **Limits:** not applied in route mode. The header- and path-mode transport ignores `HTTP_PROXY` so the guard sees the real target.
 - **Origin:** [#31](https://github.com/denisitpro/lux-l7/pull/31) (issue [#3](https://github.com/denisitpro/lux-l7/issues/3)).
 
 ### Port allow-list
 
-- **What:** limits the target ports a client may reach. Header mode checks the port in `X-L7-Target-Host`, implicit 443 for https and 80 for http. The tunnel checks the `CONNECT` port.
-- **Enable:** always on. `UPSTREAM_ALLOW_PORTS` (default `80,443,8443,9443`) for header mode, `TUNNEL_ALLOW_PORTS` (default `443`) for the tunnel. Refusal is `403 forbidden` "upstream port not allowed".
+- **What:** limits the target ports a client may reach. Header mode checks the port in `X-L7-Target-Host` (path mode: in the path segment), implicit 443 for https and 80 for http. The tunnel checks the `CONNECT` port.
+- **Enable:** always on. `UPSTREAM_ALLOW_PORTS` (default `80,443,8443,9443`) for header and path mode, `TUNNEL_ALLOW_PORTS` (default `443`) for the tunnel. Refusal is `403 forbidden` "upstream port not allowed".
 - **Limits:** invalid entries fail startup. Not applied in route mode.
 - **Origin:** [#31](https://github.com/denisitpro/lux-l7/pull/31).
 
@@ -67,12 +74,12 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 - **What:** `X-L7-Target-Scheme: http`, or `UPSTREAM_DEFAULT_SCHEME=http`, would let a client downgrade the upstream hop. Plain http is refused unless enabled.
 - **Enable:** off by default; `UPSTREAM_ALLOW_HTTP=true` enables it. A disallowed scheme header is `400 bad_target`; `UPSTREAM_DEFAULT_SCHEME=http` without the allowance fails startup.
-- **Limits:** header mode only; route upstream schemes come from `ROUTES`.
+- **Limits:** the header is header mode only; path mode has no client scheme override and uses `UPSTREAM_DEFAULT_SCHEME`, so `http` there needs both `UPSTREAM_DEFAULT_SCHEME=http` and the allowance. Route upstream schemes come from `ROUTES`.
 - **Origin:** [#30](https://github.com/denisitpro/lux-l7/pull/30).
 
 ### Header stripping
 
-- **What:** `X-L7-Target-Host`, `X-L7-Target-Scheme` and `X-L7-Proxy-Token` never reach the upstream (both modes). In header mode a client `X-L7-Hops` is removed too.
+- **What:** `X-L7-Target-Host`, `X-L7-Target-Scheme` and `X-L7-Proxy-Token` never reach the upstream (header and path mode; route mode removes the same three). In header mode a client `X-L7-Hops` is removed too.
 - **Enable:** always on.
 - **Limits:** in route mode `X-L7-Hops` is the loop counter and is forwarded, incremented.
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); hops [#30](https://github.com/denisitpro/lux-l7/pull/30).
@@ -86,9 +93,9 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 ### Target validation and body limit
 
-- **What:** the header-mode target must be a non-empty host with an optional port `1..65535` and no userinfo, path, query or fragment characters (`400 bad_target`). Request bodies above `UPSTREAM_MAX_BYTES` are refused: `413 body_too_large` when `Content-Length` says so up front, otherwise (chunked) the body is cut while streaming and the proxy answers `413 body_too_large` too.
+- **What:** the header-mode target (and the path-mode host segment) must be a non-empty host with an optional port `1..65535` and no userinfo, path, query or fragment characters (`400 bad_target`). Request bodies above `UPSTREAM_MAX_BYTES` are refused: `413 body_too_large` when `Content-Length` says so up front, otherwise (chunked) the body is cut while streaming and the proxy answers `413 body_too_large` too.
 - **Enable:** always on; `UPSTREAM_MAX_BYTES` (default 32 MiB, must be > 0).
-- **Limits:** applies to route mode too.
+- **Limits:** the body limit applies to every mode.
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); validation [#30](https://github.com/denisitpro/lux-l7/pull/30).
 
 ## Protocol support

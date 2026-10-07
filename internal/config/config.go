@@ -40,12 +40,13 @@ const (
 	defaultTunnelMaxConns = 300
 )
 
-// ProxyMode selects header-based or static route-table forwarding.
+// ProxyMode selects header-based, path-based or static route-table forwarding.
 type ProxyMode string
 
 const (
 	ProxyModeHeader ProxyMode = "header"
 	ProxyModeRoute  ProxyMode = "route"
+	ProxyModePath   ProxyMode = "path"
 )
 
 // AuthMode selects how proxy tokens are validated.
@@ -73,13 +74,13 @@ type Config struct {
 	UpstreamTimeout  time.Duration
 	UpstreamMaxBytes int64
 	UpstreamScheme   string
-	// UpstreamAllowHTTP permits plain-http upstreams in header mode (default scheme or
-	// X-L7-Target-Scheme). Off by default so a client cannot downgrade the upstream hop.
+	// UpstreamAllowHTTP permits plain-http upstreams in header and path mode (default scheme or,
+	// in header mode, X-L7-Target-Scheme). Off by default so a client cannot downgrade the upstream hop.
 	UpstreamAllowHTTP bool
-	// UpstreamAllowPrivate disables the SSRF guard (header mode and tunnel): loopback, private,
+	// UpstreamAllowPrivate disables the SSRF guard (header mode, path mode and tunnel): loopback, private,
 	// link-local and other non-public resolved IPs become reachable. Local tests only.
 	UpstreamAllowPrivate bool
-	// UpstreamAllowPorts lists the target ports a header-mode client may reach.
+	// UpstreamAllowPorts lists the target ports a header- or path-mode client may reach.
 	UpstreamAllowPorts []int
 	// UpstreamForwardClientIP sends X-Forwarded-For / -Host / -Proto to the header-mode upstream.
 	UpstreamForwardClientIP bool
@@ -304,16 +305,16 @@ func validate(cfg *Config, routesRaw string) error {
 		return fmt.Errorf("TUNNEL_IDLE_TIMEOUT must be > 0, got %s", cfg.TunnelIdleTimeout)
 	}
 	switch cfg.ProxyMode {
-	case ProxyModeHeader, ProxyModeRoute:
+	case ProxyModeHeader, ProxyModeRoute, ProxyModePath:
 	default:
-		return fmt.Errorf("PROXY_MODE must be header or route, got %q", cfg.ProxyMode)
+		return fmt.Errorf("PROXY_MODE must be header, route or path, got %q", cfg.ProxyMode)
 	}
 	if cfg.RouteMaxHops < 1 {
 		return inEveryMode(fmt.Errorf("ROUTE_MAX_HOPS must be >= 1, got %d", cfg.RouteMaxHops))
 	}
-	if cfg.ProxyMode == ProxyModeHeader {
+	if cfg.ProxyMode != ProxyModeRoute {
 		if routesRaw != "" {
-			return fmt.Errorf("ROUTES must not be set when PROXY_MODE=header")
+			return fmt.Errorf("ROUTES must not be set when PROXY_MODE=%s", cfg.ProxyMode)
 		}
 	} else {
 		if routesRaw == "" {
@@ -331,7 +332,7 @@ func validate(cfg *Config, routesRaw string) error {
 	default:
 		return inEveryMode(fmt.Errorf("UPSTREAM_DEFAULT_SCHEME must be http or https, got %q", cfg.UpstreamScheme))
 	}
-	if cfg.ProxyMode == ProxyModeHeader {
+	if cfg.ProxyMode != ProxyModeRoute {
 		if cfg.UpstreamScheme == "http" && !cfg.UpstreamAllowHTTP {
 			return fmt.Errorf("UPSTREAM_DEFAULT_SCHEME=http requires UPSTREAM_ALLOW_HTTP=true")
 		}
@@ -377,10 +378,10 @@ func (c Config) Warnings() []string {
 	if c.ProxyMode == ProxyModeRoute && (len(c.AllowHosts) > 0 || len(c.AllowSuffixes) > 0 || len(c.DenyHosts) > 0) {
 		w = append(w, "UPSTREAM_ALLOW_HOSTS, UPSTREAM_ALLOW_SUFFIXES and UPSTREAM_DENY_HOSTS are ignored in route mode")
 	}
-	if c.ProxyMode == ProxyModeHeader && len(c.AllowHosts) == 0 && len(c.AllowSuffixes) == 0 {
+	if c.ProxyMode != ProxyModeRoute && len(c.AllowHosts) == 0 && len(c.AllowSuffixes) == 0 {
 		w = append(w, "upstream allow-list empty: any host may be targeted unless UPSTREAM_DENY_HOSTS blocks it")
 	}
-	if c.UpstreamAllowPrivate && (c.ProxyMode == ProxyModeHeader || c.TunnelAddr != "") {
+	if c.UpstreamAllowPrivate && (c.ProxyMode != ProxyModeRoute || c.TunnelAddr != "") {
 		w = append(w, "UPSTREAM_ALLOW_PRIVATE=true: SSRF guard off, loopback, private and metadata upstreams are reachable")
 	}
 	if len(c.UpstreamTrustedProxies) > 0 && !c.UpstreamForwardClientIP {
