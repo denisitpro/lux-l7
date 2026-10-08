@@ -48,6 +48,8 @@ func TestSplitAuthority(t *testing.T) {
 		{"example.com.", "example.com", ""},
 		{"Example.com.:443", "example.com", "443"},
 		{"[::1]:8443", "::1", "8443"},
+		{"[::1]", "::1", ""},
+		{"[2001:DB8::1]", "2001:db8::1", ""},
 		{"127.0.0.1:65535", "127.0.0.1", "65535"},
 	}
 	for _, c := range ok {
@@ -61,7 +63,7 @@ func TestSplitAuthority(t *testing.T) {
 			t.Errorf("%q: want error, got %v", in, err)
 		}
 	}
-	for _, in := range []string{"example.com:0", "example.com:65536", "example.com:x", "example.com:", "[::1]"} {
+	for _, in := range []string{"example.com:0", "example.com:65536", "example.com:x", "example.com:", "[::1]:0", "[::1]:x", "2001:db8::1"} {
 		if _, _, err := policy.SplitAuthority(in); !errors.Is(err, policy.ErrInvalidPort) {
 			t.Errorf("%q: want ErrInvalidPort, got %v", in, err)
 		}

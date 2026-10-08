@@ -74,6 +74,8 @@ func bareHost(raw string) string {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	if host, _, err := net.SplitHostPort(raw); err == nil {
 		raw = host
+	} else {
+		raw = strings.Trim(raw, "[]")
 	}
 	return strings.TrimSuffix(raw, ".")
 }

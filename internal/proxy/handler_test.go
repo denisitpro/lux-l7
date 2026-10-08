@@ -557,3 +557,12 @@ func TestOriginMarker(t *testing.T) {
 		t.Fatalf("upstream response carries marker %q", v)
 	}
 }
+
+func TestBracketedIPv6WithoutPortReachesSSRFGuard(t *testing.T) {
+	cfg := httpCfg()
+	cfg.UpstreamAllowPrivate = false
+	code, body := do(t, newProxy(t, cfg), map[string]string{headers.TargetHost: "[::1]"})
+	if code != http.StatusForbidden || !strings.Contains(body, "upstream address not allowed") {
+		t.Fatalf("status=%d body=%s", code, body)
+	}
+}

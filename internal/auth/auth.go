@@ -130,7 +130,7 @@ func mapHostKey(authority string) string {
 	}
 	host, _, err := net.SplitHostPort(authority)
 	if err != nil {
-		return authority
+		return strings.Trim(authority, "[]") // bare IPv6 form: "[::1]" and "::1" are one key
 	}
 	return host
 }

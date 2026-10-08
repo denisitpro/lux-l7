@@ -229,6 +229,8 @@ func newTarget(scheme, rawHost, what string) (target, error) {
 	}
 	if port != "" {
 		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]" // IPv6 literal without a port stays bracketed
 	}
 
 	return target{scheme: scheme, host: host}, nil

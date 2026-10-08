@@ -4,6 +4,7 @@ package policy
 import (
 	"errors"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 )
@@ -16,6 +17,7 @@ var (
 
 // SplitAuthority validates raw as host or host:port and returns the lowercased host
 // (one trailing dot dropped, IPv6 brackets removed) and the port ("" when absent).
+// A bracketed IPv6 literal may omit the port ("[2001:db8::1]").
 // Userinfo, path, query and fragment characters are refused, and a port must be 1..65535.
 func SplitAuthority(raw string) (host, port string, err error) {
 	raw = strings.TrimSpace(raw)
@@ -23,6 +25,14 @@ func SplitAuthority(raw string) (host, port string, err error) {
 		return "", "", ErrInvalidAuthority
 	}
 	host = strings.ToLower(raw)
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		// Bracketed IPv6 literal without a port: the scheme default applies.
+		host = host[1 : len(host)-1]
+		if a, perr := netip.ParseAddr(host); perr != nil || !a.Is6() || a.Zone() != "" {
+			return "", "", ErrInvalidAuthority
+		}
+		return host, "", nil
+	}
 	if strings.Contains(host, ":") {
 		host, port, err = net.SplitHostPort(host)
 		if err != nil {
@@ -133,7 +143,7 @@ func hostname(authority string) string {
 	}
 	host, _, err := net.SplitHostPort(authority)
 	if err != nil {
-		return authority
+		return strings.Trim(authority, "[]")
 	}
 	return normalizeHost(host)
 }

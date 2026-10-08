@@ -96,3 +96,27 @@ func TestInstanceNoValidTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestPerHostIPv6KeyForms(t *testing.T) {
+	for _, key := range []string{"::1", "[::1]"} {
+		v, err := auth.New(config.Config{
+			AuthEnabled:   true,
+			AuthMode:      config.AuthModePerHost,
+			HostTokenJSON: `{"` + key + `":"tok"}`,
+		})
+		if err != nil {
+			t.Fatalf("key %q: %v", key, err)
+		}
+		for _, target := range []string{"[::1]", "[::1]:8443", "::1"} {
+			if !v.Authorize("tok", target) {
+				t.Errorf("key %q target %q: want authorized", key, target)
+			}
+			if v.Authorize("bad", target) {
+				t.Errorf("key %q target %q: wrong token accepted", key, target)
+			}
+		}
+		if v.Authorize("tok", "[::2]") {
+			t.Errorf("key %q: other host accepted", key)
+		}
+	}
+}
