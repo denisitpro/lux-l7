@@ -592,6 +592,8 @@ func TestCertReload(t *testing.T) {
 	}
 
 	// A broken replacement keeps the old certificate in service.
+	// The reloader checks mtimes at most once per second; wait out the interval.
+	time.Sleep(1100 * time.Millisecond)
 	if err := os.WriteFile(certFile, []byte("garbage"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -601,6 +603,8 @@ func TestCertReload(t *testing.T) {
 
 	// A valid pair with a newer mtime is picked up without a restart.
 	selfSigned(t, dir, "second")
+	// The reloader checks mtimes at most once per second; wait out the interval.
+	time.Sleep(1100 * time.Millisecond)
 	if got := served(); got != "second" {
 		t.Fatalf("after reload served %q, want second", got)
 	}
