@@ -705,3 +705,38 @@ func TestOriginMarker(t *testing.T) {
 		t.Fatalf("upstream response carries marker %q", v)
 	}
 }
+
+func TestDotSegmentsRejected(t *testing.T) {
+	var calls atomic.Int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+	}))
+	t.Cleanup(up.Close)
+	routes := mustRoutes(t, `[{"host":"example.com","path_prefix":"/api","upstream":"`+upstreamURL(up)+`","rewrite_prefix":"/v1"}]`)
+	srv := httptest.NewServer(relay.New(testCfg(), routes, nil, relay.Options{}))
+	t.Cleanup(srv.Close)
+
+	for _, p := range []string{"/api/../../admin", "/api/%2e%2e/x", "/api/%2E/x"} {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+p, nil)
+		req.Host = "example.com"
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), `"error":"bad_path"`) {
+			t.Fatalf("%s: status=%d body=%s", p, res.StatusCode, body)
+		}
+		if res.Header.Get(headers.ProxyOrigin) != headers.ProxyOriginValue {
+			t.Fatalf("%s: marker missing", p)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("upstream called %d times", calls.Load())
+	}
+
+	if res := doGet(t, srv.URL+"/api/x.y/..z", "example.com"); res.StatusCode != http.StatusOK || calls.Load() != 1 {
+		t.Fatalf("status=%d calls=%d", res.StatusCode, calls.Load())
+	}
+}

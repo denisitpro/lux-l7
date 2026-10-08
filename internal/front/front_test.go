@@ -72,6 +72,9 @@ func rawGet(t *testing.T, addr, target string, hdr map[string]string) *http.Resp
 
 var oddPaths = []string{"//a//b", "/a/../b", "/a/./b", "//"}
 
+// Route mode refuses dot segments (400 bad_path, #61); the rest passes verbatim.
+var routeOddPaths = []string{"//a//b", "//"}
+
 func TestHeaderModePathsReachUpstreamUnchanged(t *testing.T) {
 	rec := newRecorder(t)
 	cfg := config.Config{UpstreamScheme: "http", UpstreamAllowHTTP: true, UpstreamAllowPrivate: true, UpstreamMaxBytes: 1 << 20}
@@ -88,7 +91,7 @@ func TestHeaderModePathsReachUpstreamUnchanged(t *testing.T) {
 			t.Fatalf("%q: status=%d", p, res.StatusCode)
 		}
 	}
-	assertSeen(t, rec.seen())
+	assertSeen(t, rec.seen(), oddPaths)
 }
 
 func TestRouteModePathsReachUpstreamUnchanged(t *testing.T) {
@@ -101,21 +104,27 @@ func TestRouteModePathsReachUpstreamUnchanged(t *testing.T) {
 	srv := httptest.NewServer(front.New(relay.New(cfg, routes, nil, relay.Options{})))
 	t.Cleanup(srv.Close)
 
-	for _, p := range oddPaths {
+	for _, p := range routeOddPaths {
 		res := rawGet(t, srv.Listener.Addr().String(), p, map[string]string{"Host": "example.com"})
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("%q: status=%d", p, res.StatusCode)
 		}
 	}
-	assertSeen(t, rec.seen())
+	assertSeen(t, rec.seen(), routeOddPaths)
+	for _, p := range []string{"/a/../b", "/a/./b"} {
+		res := rawGet(t, srv.Listener.Addr().String(), p, map[string]string{"Host": "example.com"})
+		if res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%q: status=%d, want 400", p, res.StatusCode)
+		}
+	}
 }
 
-func assertSeen(t *testing.T, got []string) {
+func assertSeen(t *testing.T, got, want []string) {
 	t.Helper()
-	if len(got) != len(oddPaths) {
-		t.Fatalf("upstream saw %v, want %v", got, oddPaths)
+	if len(got) != len(want) {
+		t.Fatalf("upstream saw %v, want %v", got, want)
 	}
-	for i, p := range oddPaths {
+	for i, p := range want {
 		if got[i] != p {
 			t.Fatalf("upstream saw %q, want %q", got[i], p)
 		}

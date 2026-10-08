@@ -7,6 +7,31 @@ import (
 	"github.com/denisitpro/lux-l7/internal/route"
 )
 
+func TestHasDotSegment(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/a/../b", true},
+		{"/..", true},
+		{"/a/./b", true},
+		{"/a/%2e%2e/b", true},
+		{"/a/%2E./b", true},
+		{"/a/.%2e/b", true},
+		{"/a/%2e/b", true},
+		{"/a/.hidden", false},
+		{"/a..b", false},
+		{"/a/...", false},
+		{"/", false},
+		{"//a//b", false},
+	}
+	for _, c := range cases {
+		if got := route.HasDotSegment(c.path); got != c.want {
+			t.Errorf("HasDotSegment(%q)=%v want %v", c.path, got, c.want)
+		}
+	}
+}
+
 func TestMatchHost(t *testing.T) {
 	cases := []struct {
 		req, pattern string
