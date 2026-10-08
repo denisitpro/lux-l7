@@ -1,6 +1,6 @@
 # Listener, shutdown and logging
 
-> Status: living · Last verified: 2026-10-06 · [AI - claude-sonnet-5-5]
+> Status: living · Last verified: 2026-10-08 · [AI - claude-sonnet-5-5]
 
 How the main HTTP listener behaves, how the process stops, and how it logs. Part of the [configuration guide](../configuration.md); the common value rules (durations, booleans) are there.
 
@@ -24,7 +24,7 @@ The main listener speaks plain HTTP/1.x by default: end TLS at an ingress or loa
 - **Default:** empty (plain HTTP/1.1 listener, as before).
 - **Change it when:** the proxy runs without an ingress or load balancer that ends TLS, i.e. on its own published port.
 - **Example:** `HTTP_TLS_CERT_FILE=/etc/lux-l7/tls.crt` and `HTTP_TLS_KEY_FILE=/etc/lux-l7/tls.key`
-- **If wrong:** only one of the two set fails startup; an unreadable or mismatching pair fails startup. The files are re-read when either one's modification time changes (checked at the next handshake), so a renewed certificate needs no restart; if a reload fails, the previous certificate is kept and a warning is logged. Same behaviour as `TUNNEL_TLS_*`; the tunnel pair is separate and can differ.
+- **If wrong:** only one of the two set fails startup; an unreadable or mismatching pair fails startup. The files are re-read when either one's modification time changes (checked at the next handshake, at most once per second), so a renewed certificate needs no restart; if a reload fails, the previous certificate is kept and a warning is logged. Same behaviour as `TUNNEL_TLS_*`; the tunnel pair is separate and can differ.
 - **WebSocket:** `net/http` does not serve WebSocket over HTTP/2 (RFC 8441 extended `CONNECT`), so WebSocket clients must use HTTP/1.1 (the usual `Upgrade` handshake over the same TLS port; browsers and common libraries do this by default). Requests that arrive over HTTP/2 are proxied to the upstream as before; SSE and streaming work over both.
 - **Deployment without ingress:** publish the port directly, for example in Docker Compose:
 

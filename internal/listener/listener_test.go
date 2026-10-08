@@ -210,6 +210,8 @@ func TestCertReloadOnMainListener(t *testing.T) {
 		t.Fatalf("served %q, want first", got)
 	}
 	certstest.SelfSigned(t, dir, "second")
+	// The reloader checks mtimes at most once per second; wait out the interval.
+	time.Sleep(1100 * time.Millisecond)
 	if got := served(); got != "second" {
 		t.Fatalf("after rotation served %q, want second", got)
 	}
