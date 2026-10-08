@@ -1,7 +1,7 @@
 # Code audit, 2026-10-08
 
 > Status: in-flight · Last verified: 2026-10-08 · [AI - claude-fable-5-1]
-> Archive when: every open question below has an owner decision recorded as an issue or a closed line here.
+> Archive when: question 5 has a decision in #61 and the IPv6 and deny-suffix issues are closed or explicitly deferred.
 
 ## Scope
 
@@ -32,14 +32,14 @@ Full read of `cmd/lux-l7` and `internal/` (auth, certs, config, egress, front, l
 | #81 | #85 | Docs drift: `forbidden` listed for route mode, `path` missing from the metrics mode label, hijacked WebSocket connections not drained on shutdown, exact names of the removed `AUTH_*` variables. |
 | #82 | #88 | Tests used the registered domain `evil.net` as the denied-host fixture; now `denied.invalid`. |
 
-## Open questions for the owner
+## Owner decisions (2026-10-08)
 
-1. CONNECT on the main listener in header and path mode is forwarded to the upstream as a CONNECT request (route mode answers 405 `method_not_allowed`). Options: (a) refuse with 405 in header and path mode too (consistent, but a behaviour change for an undefined case); (b) keep and document it.
-2. A bracketed IPv6 literal without a port (`X-L7-Target-Host: [2001:db8::1]`) is refused as "invalid port", although the protocol doc says "IPv6 in brackets"; a policy test asserts the refusal. Options: (a) accept it, the port defaults from the scheme; (b) keep it and document "an IPv6 literal needs an explicit port" (relates to #17).
-3. `UPSTREAM_TRUSTED_PROXIES` empty means every peer's inbound `X-Forwarded-*` is trusted when `UPSTREAM_FORWARD_CLIENT_IP=true`, so a direct client can spoof the chain. Options: (a) keep (documented ingress-controller default); (b) flip the default to "trust none" behind a deprecation path (no silent breaking change).
-4. `UPSTREAM_DENY_HOSTS` is exact-match only: a denied apex does not deny its subdomains. Options: (a) keep; (b) add `UPSTREAM_DENY_SUFFIXES` next to the allow suffixes.
-5. #61 (route `rewrite_prefix` does not confine `..` paths) still waits for a decision: document that prefixes are routing, not an access boundary, or reject dot segments in route mode.
-6. Going public: the git history carries a personal author e-mail on most commits and commit messages that name the owner's other repositories; `CLAUDE.md` names the CI/CD reference repository (#78 covers that line); `claude-memory/` files quote private chat and session ids (#78 proposes deleting them). Options: (a) rewrite history or re-create the repository before publishing; (b) accept the history as is and fix only the tracked files.
+1. CONNECT on the main listener in header and path mode is forwarded to the upstream as a CONNECT request (route mode answers 405 `method_not_allowed`). Decision: deferred; the CONNECT path on the main listener is not in use and untested yet, behaviour stays as is. Revisit when the tunnel is exercised.
+2. A bracketed IPv6 literal without a port (`X-L7-Target-Host: [2001:db8::1]`) is refused as "invalid port", although the protocol doc says "IPv6 in brackets"; a policy test asserts the refusal. Decision: accept it, the port defaults from the scheme (see the issue titled `Bracketed IPv6 literal without a port is refused as "invalid port"`).
+3. `UPSTREAM_TRUSTED_PROXIES` empty means every peer's inbound `X-Forwarded-*` is trusted when `UPSTREAM_FORWARD_CLIENT_IP=true`, so a direct client can spoof the chain. Decision: keep trusting every peer by default. A proxy forwards whatever it is given; deciding who may set `X-Forwarded-*` is the operator's job through `UPSTREAM_TRUSTED_PROXIES`.
+4. `UPSTREAM_DENY_HOSTS` is exact-match only: a denied apex does not deny its subdomains. Decision: feature issue #93 (`UPSTREAM_DENY_SUFFIXES`), not scheduled.
+5. #61 (route `rewrite_prefix` does not confine `..` paths) still waits for a decision: document that prefixes are routing, not an access boundary, or reject dot segments in route mode. Decision: pending, the owner asked for a clearer fork with a recommendation (tracked in #61).
+6. Going public: the git history carries a personal author e-mail on most commits and commit messages that name the owner's other repositories; `CLAUDE.md` names the CI/CD reference repository (#78 covers that line); `claude-memory/` files quote private chat and session ids (#78 proposes deleting them). Decision: the repository stays private for now. Publication will happen as a new repository without history, after the tracked files are anonymised; no history rewrite here.
 
 ## Privacy sweep result
 
