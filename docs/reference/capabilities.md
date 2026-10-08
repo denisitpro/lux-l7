@@ -136,7 +136,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 - **What:** on SIGINT or SIGTERM the main server and the tunnel stop accepting and drain for up to `SHUTDOWN_TIMEOUT`; open tunnels still alive at the deadline are force-closed. A failed shutdown exits non-zero.
 - **Enable:** always on; `SHUTDOWN_TIMEOUT` (default 15s, must be > 0).
-- **Limits:** a tunnel arriving during shutdown gets `503 shutting_down`.
+- **Limits:** a tunnel arriving during shutdown gets `503 shutting_down`. Only CONNECT tunnels are waited for. `http.Server.Shutdown` does not track hijacked connections, so WebSocket connections upgraded through header, path or route mode are not drained: they are cut when the process exits right after the drain.
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); tunnel part [#32](https://github.com/denisitpro/lux-l7/pull/32).
 
 ### JSON logs
@@ -151,7 +151,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 ### Prometheus metrics
 
 - **What:** `/metrics` (text format, plus Go and process collectors) on its own listener, never on `HTTP_ADDR` or the tunnel listener. Series, all prefixed `lux_l7_`, with the constant label `location` when `METRICS_LOCATION` is set:
-  - `requests_total{mode,ingress_host,upstream_host,status_class}`: every proxied request, rejections included; `/healthz`, `/readyz`, `/version` are not counted. `mode` is `header|route|tunnel`; `status_class` is `2xx|3xx|4xx|5xx|error` (`error`: no response written, e.g. client cancel). A tunnel is counted when it opens.
+  - `requests_total{mode,ingress_host,upstream_host,status_class}`: every proxied request, rejections included; `/healthz`, `/readyz`, `/version` are not counted. `mode` is `header|path|route|tunnel`; `status_class` is `2xx|3xx|4xx|5xx|error` (`error`: no response written, e.g. client cancel). A tunnel is counted when it opens.
   - `request_duration_seconds{mode,status_class}`: histogram (a tunnel's value is its lifetime).
   - `rejections_total{mode,reason}`: refused before an upstream, reason is a fixed set: `bad_target`, `unauthorized` (header), `proxy_auth_required` (tunnel), `forbidden_host`, `forbidden_port`, `body_too_large` (also a chunked body cut mid-stream), `method_not_allowed`, `no_route`, `bad_hops`, `loop_detected`, `shutting_down`, `tunnel_capacity`, `internal`.
   - `upstream_errors_total{mode,reason}`: `timeout|blocked|canceled|other`, including tunnel dial failures.
