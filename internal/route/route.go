@@ -4,7 +4,6 @@ package route
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/url"
 	"strings"
@@ -23,6 +22,10 @@ type Route struct {
 	OutHost string
 	// ServerName is the TLS SNI for https upstreams (empty for http).
 	ServerName string
+	// Warning is a non-fatal note about this route (empty: none). It is returned, not
+	// logged, because parsing runs before the JSON log handler is installed;
+	// config.Warnings passes it on.
+	Warning string
 }
 
 type routeJSON struct {
@@ -109,7 +112,7 @@ func validateRoute(i int, item routeJSON) (Route, error) {
 
 	// One route has one connection pool, so the outgoing Host (and therefore the
 	// SNI) must be fixed per route: a Host varying per request would break
-	// SNI == Host, which Cloudflare-fronted upstreams enforce. The default is the
+	// SNI == Host, which CDN-fronted upstreams often enforce. The default is the
 	// upstream authority as written (host plus port); host_header overrides it and,
 	// like the default, keeps its port (it is sent as-is); SNI never carries one.
 	outHost := strings.ToLower(u.Host)
@@ -117,14 +120,15 @@ func validateRoute(i int, item routeJSON) (Route, error) {
 		outHost = strings.ToLower(hostHeader)
 	}
 	serverName := ""
+	warning := ""
 	if u.Scheme == "https" {
 		hostName := normalizeRequestHost(outHost)
 		serverName = hostName
 		if tlsName != "" {
 			serverName = normalizeRequestHost(tlsName)
 			if serverName != hostName {
-				slog.Default().Warn("SNI differs from Host; Cloudflare-fronted upstreams reject this",
-					"route", i, "sni", serverName, "host", hostName)
+				warning = fmt.Sprintf("%s: tls_server_name %q differs from the outgoing Host %q; some CDN-fronted upstreams reject this",
+					prefix, serverName, hostName)
 			}
 		}
 	}
@@ -138,6 +142,7 @@ func validateRoute(i int, item routeJSON) (Route, error) {
 		HostHeader:    hostHeader,
 		TLSServerName: tlsName,
 		RewritePrefix: rewrite,
+		Warning:       warning,
 	}, nil
 }
 
