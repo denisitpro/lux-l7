@@ -1,6 +1,6 @@
 # Capabilities
 
-> Status: living · Last verified: 2026-10-07 · [AI - claude-sonnet-5-5]
+> Status: living · Last verified: 2026-10-08 · [AI - claude-sonnet-5-5]
 
 What lux-l7 does, verified against `cmd/` and `internal/`. One entry per capability: what it does, how to enable it, limits, origin. Wire details live in [`protocol.md`](protocol.md), every env variable in [`configuration.md`](configuration.md). The roadmap is the [`label:feature` issue list](https://github.com/denisitpro/lux-l7/issues?q=is%3Aopen+label%3Afeature).
 
@@ -145,7 +145,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 - **Enable:** always on; `LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`).
 - **Header mode and tunnel** (the log must not leak): at `info` nothing per request, and never the client address, path, query, target host or a token. At `warn` and `error` an upstream failure is logged as its reason only (`timeout`, `blocked` at `warn`; any other transport fault at `error`), deduplicated: the first occurrence at once, then one `upstream errors repeated` line with a count per minute, and the next failure after a quiet minute is logged at once again. At `debug` one `request` line per request: method, target host (`host[:port]`), status (`0`: no response written), `duration_ms`, `bytes` (a tunnel: bytes relayed both ways, logged when it closes), and `error` when refused or failed. Never path, query, tokens or client address.
 - **Route mode** (the operator must see how upstreams behave): at `info` one `route summary` line per minute for every route that had traffic, none when idle: route index, upstream host, `requests`, `status` classes, `errors` by reason, `p50_ms` and `p95_ms` (nearest rank over the latest 4096 requests of the minute). At `warn` an upstream state change, once each: `upstream failing` after 5 consecutive upstream errors (with the last reason) and `upstream recovered` on the first response afterwards; a client cancel or a refusal before the upstream does not count. At `debug` one `request` line per request: route index, upstream host, status, `duration_ms`, `bytes`; no query, no client address. A request that matched no route is not logged.
-- **Limits:** every level includes the ones above it (`debug` shows `info` and `warn` lines too). The summary interval is fixed at one minute. The last partial interval is flushed on shutdown. Upstream error text is never logged (it can name the dial address). No request IDs exist in the code.
+- **Limits:** every level includes the ones above it (`debug` shows `info` and `warn` lines too). The summary interval is fixed at one minute. The last partial interval is flushed on shutdown. Upstream error text is never logged (it can name the dial address). The standard library's own error lines (TLS handshake failures, handler panics, accept errors, a body copy that fails after the response started) are dropped on every listener and reverse proxy, because they carry client and upstream addresses; such a failure shows to the client as a cut connection, not in the log. No request IDs exist in the code.
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); per-mode logging [#54](https://github.com/denisitpro/lux-l7/issues/54).
 
 ### Prometheus metrics
