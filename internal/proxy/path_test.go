@@ -284,3 +284,12 @@ func TestHeaderModeLeavesLocationAlone(t *testing.T) {
 		t.Fatalf("Location = %q", got)
 	}
 }
+
+func TestPathModeBracketedIPv6WithoutPortReachesSSRFGuard(t *testing.T) {
+	cfg := pathCfg()
+	cfg.UpstreamAllowPrivate = false
+	res, body := get(t, newProxy(t, cfg), "/h/[::1]/x", nil)
+	if res.StatusCode != http.StatusForbidden || !strings.Contains(body, "upstream address not allowed") {
+		t.Fatalf("status=%d body=%s", res.StatusCode, body)
+	}
+}

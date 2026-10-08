@@ -37,7 +37,7 @@ Generate each token with `openssl rand -hex 32` (64 hex characters). Treat token
 ### `PROXY_AUTH_HOST_MAP`
 
 - **What:** a different token per target host (the `per_host` model). A client can only use the token that belongs to the host it targets.
-- **Values:** a one-line JSON object, host to token. Keys are bare target hosts: lowercased, port ignored, exact match, no suffixes.
+- **Values:** a one-line JSON object, host to token. Keys are bare target hosts: lowercased, port ignored, exact match, no suffixes. An IPv6 host is keyed bare (`::1`; `[::1]` is read as the same key).
 - **Default:** unset.
 - **Change it when:** different clients or teams must not be able to use each other's targets.
 - **Example:** `PROXY_AUTH_HOST_MAP={"api.example.com":"tok-a","files.example.com":"tok-b"}`

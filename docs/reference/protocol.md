@@ -65,7 +65,7 @@ Client sends an ordinary HTTP request to the proxy and names the upstream in hea
 
 | Header | Required | Meaning |
 |---|---|---|
-| `X-L7-Target-Host` | yes | Upstream authority `host` or `host:port`, no scheme. IPv6 in brackets. |
+| `X-L7-Target-Host` | yes | Upstream authority `host` or `host:port`, no scheme. IPv6 in brackets; the port may be omitted (`[2001:db8::1]`) and is then the scheme default, like for any host. |
 | `X-L7-Target-Scheme` | no | `https` or `http`; default from `UPSTREAM_DEFAULT_SCHEME`. `http` is accepted only when `UPSTREAM_ALLOW_HTTP=true`. |
 | `X-L7-Proxy-Token` | when auth is on | Instance token or per-host token. |
 
@@ -95,7 +95,7 @@ GET /h/api.example.com/v1/items?limit=5 HTTP/1.1
 X-L7-Proxy-Token: <token>          (only when auth is on)
 ```
 
-is forwarded as `GET https://api.example.com/v1/items?limit=5`. Form: `/h/<host>[:port]/<path>?<query>`; IPv6 in brackets (`/h/[2001:db8::1]:443/x`). The scheme is `UPSTREAM_DEFAULT_SCHEME`; there is no per-request scheme. `X-L7-Target-Host`, `X-L7-Target-Scheme` and `X-L7-Proxy-Token` are ignored for routing and removed before the upstream. The token is read from the header only, never from path or query. Path and query go on verbatim (`%2F` stays encoded); an empty path (`/h/api.example.com`) is `/`. The outgoing `Host` is the target authority.
+is forwarded as `GET https://api.example.com/v1/items?limit=5`. Form: `/h/<host>[:port]/<path>?<query>`; IPv6 in brackets (`/h/[2001:db8::1]:443/x`, port optional: `/h/[2001:db8::1]/x`). The scheme is `UPSTREAM_DEFAULT_SCHEME`; there is no per-request scheme. `X-L7-Target-Host`, `X-L7-Target-Scheme` and `X-L7-Proxy-Token` are ignored for routing and removed before the upstream. The token is read from the header only, never from path or query. Path and query go on verbatim (`%2F` stays encoded); an empty path (`/h/api.example.com`) is `/`. The outgoing `Host` is the target authority.
 
 Checks and status codes are those of header mode, in the same order. Check 1 differs: `400 bad_target` with `detail` `path must start with /h/<host>`, `missing target host in path`, `invalid target host in path` (also for a percent-encoded host), `invalid target host in path port`, or `http upstream scheme is disabled`.
 
