@@ -12,6 +12,7 @@ import (
 
 	"github.com/denisitpro/lux-l7/internal/certs"
 	"github.com/denisitpro/lux-l7/internal/config"
+	"github.com/denisitpro/lux-l7/internal/discardlog"
 )
 
 // Server wraps the main http.Server together with its TLS settings.
@@ -33,6 +34,8 @@ func New(cfg config.Config, h http.Handler, log *slog.Logger) (*Server, error) {
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
+		// The default error log prints the client address (handshake errors, panics).
+		ErrorLog: discardlog.New(),
 	}}
 
 	var protocols http.Protocols

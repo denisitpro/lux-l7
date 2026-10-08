@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/denisitpro/lux-l7/internal/config"
+	"github.com/denisitpro/lux-l7/internal/discardlog"
 	"github.com/denisitpro/lux-l7/internal/headers"
 	"github.com/denisitpro/lux-l7/internal/metrics"
 	"github.com/denisitpro/lux-l7/internal/proxy"
@@ -59,6 +60,8 @@ func New(cfg config.Config, routes []route.Route, log *slog.Logger, opts Options
 				h.rewrite(pr, idx)
 			},
 			ModifyResponse: proxy.StripOriginMarker,
+			// The default error log names the upstream address (body copy failures).
+			ErrorLog: discardlog.New(),
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				// Logging is the request log's job (internal/reqlog), from the observation.
 				proxy.ObserveUpstreamError(metrics.From(w), err)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/config"
+	"github.com/denisitpro/lux-l7/internal/discardlog"
 	"github.com/denisitpro/lux-l7/internal/egress"
 	"github.com/denisitpro/lux-l7/internal/headers"
 	"github.com/denisitpro/lux-l7/internal/metrics"
@@ -56,18 +57,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 		log = slog.Default()
 	}
 	p := policy.New(cfg.AllowHosts, cfg.AllowSuffixes, cfg.DenyHosts)
-	tr := &http.Transport{
-		// No env proxy: the SSRF guard must see the target, not an HTTP_PROXY hop.
-		Proxy:                 nil,
-		DialContext:           egress.NewDialer(cfg.UpstreamAllowPrivate, 30*time.Second).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          256,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: cfg.UpstreamTimeout,
-		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
-	}
+	tr := newTransport(cfg)
 
 	h := &Handler{
 		cfg:    cfg,
@@ -86,6 +76,8 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 	rp := &httputil.ReverseProxy{
 		Transport: tr,
 		Rewrite:   h.rewrite,
+		// The default error log names the upstream address (body copy failures).
+		ErrorLog: discardlog.New(),
 		// Strips an upstream-sent origin marker; path mode also rewrites redirects.
 		ModifyResponse: h.modifyResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -95,6 +87,24 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 	}
 	h.proxy = rp
 	return h
+}
+
+// newTransport builds the upstream transport for header and path mode. The dial
+// and the response-header wait are both bounded by cfg.UpstreamTimeout.
+func newTransport(cfg config.Config) *http.Transport {
+	return &http.Transport{
+		// No env proxy: the SSRF guard must see the target, not an HTTP_PROXY hop.
+		Proxy:                 nil,
+		DialContext:           egress.NewDialer(cfg.UpstreamAllowPrivate, cfg.UpstreamTimeout).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          256,
+		MaxIdleConnsPerHost:   egress.MaxIdleConnsPerHost,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: cfg.UpstreamTimeout,
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+	}
 }
 
 func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {

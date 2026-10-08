@@ -1,6 +1,6 @@
 # Client protocol
 
-> Status: living · Last verified: 2026-10-07 · [AI - claude-sonnet-5-5]
+> Status: living · Last verified: 2026-10-08 · [AI - claude-sonnet-5-5]
 
 What a client sends and what the proxy answers, per mode. What each feature does and how to enable it: [`capabilities.md`](capabilities.md). Env variables: [`configuration.md`](configuration.md).
 
@@ -41,7 +41,7 @@ The single authoritative list. A Go test fails when a code the handlers emit is 
 | `bad_target` | 400 | header, path, tunnel | Target host, port or scheme is missing or malformed, or `http` is disabled. |
 | `unauthorized` | 401 | header, path | Missing or invalid `X-L7-Proxy-Token`. |
 | `proxy_auth_required` | 407 | tunnel | Missing or invalid `Proxy-Authorization` (sets `Proxy-Authenticate`). |
-| `forbidden` | 403 | header, path, route, tunnel | Host not allowed, port not allowed, or the resolved upstream address is not public. |
+| `forbidden` | 403 | header, path, tunnel | Host not allowed, port not allowed, or the resolved upstream address is not public. |
 | `no_route` | 404 | route | No route matches host and path. |
 | `method_not_allowed` | 405 | route, tunnel | Route mode: `CONNECT`. Tunnel: anything except `CONNECT` (sets `Allow: CONNECT`). |
 | `body_too_large` | 413 | header, path, route | Request body above `UPSTREAM_MAX_BYTES`. |

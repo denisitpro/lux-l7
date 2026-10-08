@@ -91,6 +91,11 @@ func control(_, address string, _ syscall.RawConn) error {
 	return nil
 }
 
+// MaxIdleConnsPerHost is the per-upstream idle connection pool size shared by the
+// header, path and route mode transports (net/http defaults to 2, which churns
+// connections when traffic concentrates on a few upstreams).
+const MaxIdleConnsPerHost = 64
+
 // NewDialer returns a dialer that refuses non-public destinations after DNS
 // resolution. With allowPrivate it is a plain dialer (local tests, trusted setups).
 func NewDialer(allowPrivate bool, timeout time.Duration) *net.Dialer {

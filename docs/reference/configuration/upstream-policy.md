@@ -1,6 +1,6 @@
 # Upstream limits and policy
 
-> Status: living · Last verified: 2026-10-06 · [AI - claude-sonnet-5-5]
+> Status: living · Last verified: 2026-10-08 · [AI - claude-sonnet-5-5]
 
 What a client may reach in header and path mode, and the limits on upstream calls. Part of the [configuration guide](../configuration.md). The mechanisms behind these variables: [`../capabilities.md`](../capabilities.md#upstream-policy); error codes: [`../protocol.md`](../protocol.md).
 
@@ -101,7 +101,7 @@ Header and path mode. In route mode both variables are ignored (startup warning)
 
 ### `UPSTREAM_TIMEOUT`
 
-- **What:** how long the proxy waits for the upstream to start answering (response headers), in every mode. For the tunnel it is the dial timeout. It does not limit a response body that is already streaming.
+- **What:** how long the proxy waits for the upstream, in every mode: it bounds the TCP dial and, separately, the wait for response headers, so a worst case adds up to about twice the value (plus the 10 s TLS handshake limit). For the tunnel it is the dial timeout. It does not limit a response body that is already streaming.
 - **Values:** Go duration, greater than zero.
 - **Default:** `30s`.
 - **Change it when:** upstreams are slow to first byte (long-running API calls), or you want to fail fast.

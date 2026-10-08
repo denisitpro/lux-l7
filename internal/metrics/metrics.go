@@ -19,6 +19,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/denisitpro/lux-l7/internal/discardlog"
 )
 
 const namespace = "lux_l7"
@@ -67,6 +69,7 @@ func Start(log *slog.Logger, addr string, reg *prometheus.Registry) (*Server, er
 			ReadTimeout:       10 * time.Second,
 			WriteTimeout:      30 * time.Second,
 			IdleTimeout:       60 * time.Second,
+			ErrorLog:          discardlog.New(),
 		},
 	}
 	log.Info("metrics listening", "addr", ln.Addr().String())
