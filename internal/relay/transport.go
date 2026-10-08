@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/denisitpro/lux-l7/internal/config"
+	"github.com/denisitpro/lux-l7/internal/egress"
 	"github.com/denisitpro/lux-l7/internal/route"
 )
 
@@ -24,11 +25,12 @@ func newTransport(cfg config.Config, rt route.Route, rootCAs *x509.CertPool) *ht
 		// No env proxy: HTTP_PROXY would bypass the per-route SNI = Host guarantee.
 		Proxy: nil,
 		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
+			Timeout:   cfg.UpstreamTimeout,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          256,
+		MaxIdleConnsPerHost:   egress.MaxIdleConnsPerHost,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,

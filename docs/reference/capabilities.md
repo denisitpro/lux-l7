@@ -1,6 +1,6 @@
 # Capabilities
 
-> Status: living · Last verified: 2026-10-07 · [AI - claude-sonnet-5-5]
+> Status: living · Last verified: 2026-10-08 · [AI - claude-sonnet-5-5]
 
 What lux-l7 does, verified against `cmd/` and `internal/`. One entry per capability: what it does, how to enable it, limits, origin. Wire details live in [`protocol.md`](protocol.md), every env variable in [`configuration.md`](configuration.md). The roadmap is the [`label:feature` issue list](https://github.com/denisitpro/lux-l7/issues?q=is%3Aopen+label%3Afeature).
 
@@ -103,7 +103,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 - **HTTP from clients, no TLS vars:** the main listener serves cleartext HTTP/1.1 as before; TLS is expected to end at an ingress. With `HTTP_H2C=true` it also accepts cleartext HTTP/2 with prior knowledge (no `Upgrade: h2c`) ([#15](https://github.com/denisitpro/lux-l7/issues/15)).
 - **TLS on the main listener:** `HTTP_TLS_CERT_FILE` and `HTTP_TLS_KEY_FILE` (both or neither) terminate TLS 1.2 or higher in the proxy, for deployments without an ingress. ALPN offers `h2` and `http/1.1`. The pair is re-read on mtime change at the next handshake (a failed reload keeps the previous certificate and warns); an unloadable pair fails startup. Works in header and route mode, probes included. WebSocket over HTTP/2 (RFC 8441) is not supported by `net/http`: WebSocket clients use HTTP/1.1 (`Upgrade`) over the same TLS port, a test covers it. No built-in ACME and no HTTP/3. Details: [`configuration/listener.md`](configuration/listener.md#http_tls_cert_file-http_tls_key_file).
 - **Tunnel listener:** the tunnel TLS listener offers ALPN `http/1.1` only (an h2 `CONNECT` stream cannot be hijacked).
-- **HTTP to upstream:** both modes use a transport with `ForceAttemptHTTP2: true`, so an https upstream may be spoken to over HTTP/2 when it negotiates `h2`; the code does nothing more. TLS to upstream is 1.2 or higher.
+- **HTTP to upstream:** both modes use a transport with `ForceAttemptHTTP2: true`, so an https upstream may be spoken to over HTTP/2 when it negotiates `h2`; the code does nothing more. TLS to upstream is 1.2 or higher. Idle connections are pooled per upstream host (up to 64 per host, 256 in total) and the dial is bounded by `UPSTREAM_TIMEOUT`.
 - **WebSocket and streaming through header or route mode:** SSE, long downloads, slow uploads and WebSocket (`Upgrade`, then bytes both ways) pass through `httputil.ReverseProxy`; tests cover SSE and a raw WebSocket handshake in both modes. `HTTP_READ_TIMEOUT` and `HTTP_WRITE_TIMEOUT` default to `0` (off); the protection is `HTTP_READ_HEADER_TIMEOUT`, `HTTP_IDLE_TIMEOUT` and the upstream response-header wait (`UPSTREAM_TIMEOUT`). Setting a non-zero read or write timeout caps the whole request or response and cuts streams again ([#6](https://github.com/denisitpro/lux-l7/issues/6)). The CONNECT tunnel remains an option for raw long-lived connections (add ports 8443 and 9443 to `TUNNEL_ALLOW_PORTS`).
 - **Upstream errors:** an upstream timeout is `504 upstream_timeout`; another dial or transport error `502 bad_gateway`; a client cancel gets no response (it shows only in the `debug` request line). Same in both modes and in the tunnel dial.
 - **Paths:** passed verbatim, no cleaning or redirects (`//a//b`, `/a/../b`).
