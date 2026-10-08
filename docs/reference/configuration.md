@@ -1,6 +1,6 @@
 # Configuration
 
-> Status: living · Last verified: 2026-10-06 · [AI - claude-sonnet-5-5]
+> Status: living · Last verified: 2026-10-08 · [AI - claude-sonnet-5-5]
 
 The guide for people who deploy lux-l7. Everything is configured through environment variables, verified against `internal/config`. This page has the common rules, ready-made recipes and an index of every variable; each variable is explained in a topic page (what it does, accepted values, default, when to change it, an example, what happens when it is wrong). What the features do: [`capabilities.md`](capabilities.md). Copy-paste defaults: [`.env.example`](../../.env.example).
 
@@ -164,4 +164,4 @@ Every variable the code reads. Parenthesised modes say where a variable has an e
 **Socket clash rule.** Two listen addresses clash when the ports are equal and the hosts are equal or either one is a wildcard (empty, `0.0.0.0` or `::`): `:8080`, `0.0.0.0:8080`, `[::]:8080` and `127.0.0.1:8080` all clash with each other, `127.0.0.1:8080` and `127.0.0.2:8080` do not. Hostnames are not resolved, so `localhost:8080` and `127.0.0.1:8080` are not compared; the second bind then fails when listening starts. An unparsable address is left to the listener to reject.
 
 
-Warnings only (logged at startup, the process runs): empty allow list in header and path mode, auth off in header and path mode, host lists set in route mode (ignored), `UPSTREAM_ALLOW_PRIVATE=true` (header mode, path mode or tunnel), a tunnel without TLS, `HTTP_H2C=true` together with `HTTP_TLS_CERT_FILE` (the flag is ignored: TLS already offers HTTP/2), `METRICS_LOCATION` or `METRICS_INGRESS_HOSTS` without `METRICS_ADDR`, `METRICS_INGRESS_HOSTS` in route mode, `UPSTREAM_TRUSTED_PROXIES` without `UPSTREAM_FORWARD_CLIENT_IP`, either of the two in route mode (ignored), the removed `AUTH_*` variables, and a route `tls_server_name` that differs from the outgoing `Host`.
+Warnings only (logged at startup, the process runs): empty allow list in header and path mode, auth off in header and path mode, host lists set in route mode (ignored), `UPSTREAM_ALLOW_PRIVATE=true` (header mode, path mode or tunnel), a tunnel without TLS, `HTTP_H2C=true` together with `HTTP_TLS_CERT_FILE` (the flag is ignored: TLS already offers HTTP/2), `METRICS_LOCATION` or `METRICS_INGRESS_HOSTS` without `METRICS_ADDR`, `METRICS_INGRESS_HOSTS` in route mode, `UPSTREAM_TRUSTED_PROXIES` without `UPSTREAM_FORWARD_CLIENT_IP`, either of the two in route mode (ignored), the removed `AUTH_ENABLED` and `AUTH_MODE`, and a route `tls_server_name` that differs from the outgoing `Host`.

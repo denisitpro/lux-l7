@@ -115,7 +115,7 @@ func TestHeaderModeCounters(t *testing.T) {
 	if c := get(t, srv.URL, "front.example.com:8080", target(up.Listener.Addr().String())); c != 200 {
 		t.Fatalf("success status %d", c)
 	}
-	if c := get(t, srv.URL, "random.invalid", target("evil.net")); c != 403 {
+	if c := get(t, srv.URL, "random.invalid", target("denied.invalid")); c != 403 {
 		t.Fatalf("forbidden status %d", c)
 	}
 	if c := get(t, srv.URL, "", nil); c != 400 {
@@ -223,7 +223,7 @@ func TestTunnelCounters(t *testing.T) {
 		return c, strings.TrimSpace(line)
 	}
 
-	if _, line := connect("evil.net:" + fmt.Sprint(port)); !strings.Contains(line, "403") {
+	if _, line := connect("denied.invalid:" + fmt.Sprint(port)); !strings.Contains(line, "403") {
 		t.Fatalf("forbidden: %q", line)
 	}
 	c, line := connect(fmt.Sprintf("127.0.0.1:%d", port))
@@ -264,7 +264,7 @@ func TestUnknownHostsCollapseToOther(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		w, obs := begin(m, metrics.ModeHeader, httptest.NewRecorder())
 		obs.Ingress(rnd(".example.com") + ":8443")
-		obs.Upstream(p, rnd(".evil.net"))
+		obs.Upstream(p, rnd(".denied.invalid"))
 		w.WriteHeader(http.StatusOK)
 		obs.Done()
 	}

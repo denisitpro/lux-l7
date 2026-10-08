@@ -103,7 +103,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 - **HTTP from clients, no TLS vars:** the main listener serves cleartext HTTP/1.1 as before; TLS is expected to end at an ingress. With `HTTP_H2C=true` it also accepts cleartext HTTP/2 with prior knowledge (no `Upgrade: h2c`) ([#15](https://github.com/denisitpro/lux-l7/issues/15)).
 - **TLS on the main listener:** `HTTP_TLS_CERT_FILE` and `HTTP_TLS_KEY_FILE` (both or neither) terminate TLS 1.2 or higher in the proxy, for deployments without an ingress. ALPN offers `h2` and `http/1.1`. The pair is re-read on mtime change at the next handshake (mtimes are checked at most once per second) (a failed reload keeps the previous certificate and warns); an unloadable pair fails startup. Works in header and route mode, probes included. WebSocket over HTTP/2 (RFC 8441) is not supported by `net/http`: WebSocket clients use HTTP/1.1 (`Upgrade`) over the same TLS port, a test covers it. No built-in ACME and no HTTP/3. Details: [`configuration/listener.md`](configuration/listener.md#http_tls_cert_file-http_tls_key_file).
 - **Tunnel listener:** the tunnel TLS listener offers ALPN `http/1.1` only (an h2 `CONNECT` stream cannot be hijacked).
-- **HTTP to upstream:** both modes use a transport with `ForceAttemptHTTP2: true`, so an https upstream may be spoken to over HTTP/2 when it negotiates `h2`; the code does nothing more. TLS to upstream is 1.2 or higher.
+- **HTTP to upstream:** both modes use a transport with `ForceAttemptHTTP2: true`, so an https upstream may be spoken to over HTTP/2 when it negotiates `h2`; the code does nothing more. TLS to upstream is 1.2 or higher. Idle connections are pooled per upstream host (up to 64 per host, 256 in total) and the dial is bounded by `UPSTREAM_TIMEOUT`.
 - **WebSocket and streaming through header or route mode:** SSE, long downloads, slow uploads and WebSocket (`Upgrade`, then bytes both ways) pass through `httputil.ReverseProxy`; tests cover SSE and a raw WebSocket handshake in both modes. `HTTP_READ_TIMEOUT` and `HTTP_WRITE_TIMEOUT` default to `0` (off); the protection is `HTTP_READ_HEADER_TIMEOUT`, `HTTP_IDLE_TIMEOUT` and the upstream response-header wait (`UPSTREAM_TIMEOUT`). Setting a non-zero read or write timeout caps the whole request or response and cuts streams again ([#6](https://github.com/denisitpro/lux-l7/issues/6)). The CONNECT tunnel remains an option for raw long-lived connections (add ports 8443 and 9443 to `TUNNEL_ALLOW_PORTS`).
 - **Upstream errors:** an upstream timeout is `504 upstream_timeout`; another dial or transport error `502 bad_gateway`; a client cancel gets no response (it shows only in the `debug` request line). Same in both modes and in the tunnel dial.
 - **Paths:** passed verbatim, no cleaning or redirects (`//a//b`, `/a/../b`).
@@ -136,7 +136,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 - **What:** on SIGINT or SIGTERM the main server and the tunnel stop accepting and drain for up to `SHUTDOWN_TIMEOUT`; open tunnels still alive at the deadline are force-closed. A failed shutdown exits non-zero.
 - **Enable:** always on; `SHUTDOWN_TIMEOUT` (default 15s, must be > 0).
-- **Limits:** a tunnel arriving during shutdown gets `503 shutting_down`.
+- **Limits:** a tunnel arriving during shutdown gets `503 shutting_down`. Only CONNECT tunnels are waited for. `http.Server.Shutdown` does not track hijacked connections, so WebSocket connections upgraded through header, path or route mode are not drained: they are cut when the process exits right after the drain.
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); tunnel part [#32](https://github.com/denisitpro/lux-l7/pull/32).
 
 ### JSON logs
@@ -151,7 +151,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 ### Prometheus metrics
 
 - **What:** `/metrics` (text format, plus Go and process collectors) on its own listener, never on `HTTP_ADDR` or the tunnel listener. Series, all prefixed `lux_l7_`, with the constant label `location` when `METRICS_LOCATION` is set:
-  - `requests_total{mode,ingress_host,upstream_host,status_class}`: every proxied request, rejections included; `/healthz`, `/readyz`, `/version` are not counted. `mode` is `header|route|tunnel`; `status_class` is `2xx|3xx|4xx|5xx|error` (`error`: no response written, e.g. client cancel). A tunnel is counted when it opens.
+  - `requests_total{mode,ingress_host,upstream_host,status_class}`: every proxied request, rejections included; `/healthz`, `/readyz`, `/version` are not counted. `mode` is `header|path|route|tunnel`; `status_class` is `2xx|3xx|4xx|5xx|error` (`error`: no response written, e.g. client cancel). A tunnel is counted when it opens.
   - `request_duration_seconds{mode,status_class}`: histogram (a tunnel's value is its lifetime).
   - `rejections_total{mode,reason}`: refused before an upstream, reason is a fixed set: `bad_target`, `unauthorized` (header), `proxy_auth_required` (tunnel), `forbidden_host`, `forbidden_port`, `body_too_large` (also a chunked body cut mid-stream), `method_not_allowed`, `no_route`, `bad_hops`, `loop_detected`, `shutting_down`, `tunnel_capacity`, `internal`.
   - `upstream_errors_total{mode,reason}`: `timeout|blocked|canceled|other`, including tunnel dial failures.
