@@ -123,7 +123,7 @@ func headerTraffic(t *testing.T, srv *httptest.Server, upPort string) {
 		return map[string]string{headers.TargetHost: host, headers.TargetScheme: "http", headers.ProxyToken: secretToken}
 	}
 	send(secretPath, target("localhost:"+upPort))
-	send(secretPath, target("evil.net"))
+	send(secretPath, target("denied.invalid"))
 	send(secretPath, map[string]string{headers.TargetHost: "localhost:" + upPort, headers.TargetScheme: "http", headers.ProxyToken: "wrong"})
 	send(secretPath, map[string]string{headers.ProxyToken: secretToken})
 	send(secretPath, target("localhost:"+port(deadAddr(t))))
@@ -141,7 +141,7 @@ func TestHeaderModeInfoLeaksNothing(t *testing.T) {
 			got[0]["mode"] != "header" || got[0]["reason"] != "other" || len(got[0]) != 5 {
 			t.Fatalf("metrics=%v: want the first upstream error only:\n%s", withMetrics, out.String())
 		}
-		wantAbsent(t, out, "127.0.0.1", "localhost", "secret", "SECRETQ", secretToken, "evil.net", "/", upPort)
+		wantAbsent(t, out, "127.0.0.1", "localhost", "secret", "SECRETQ", secretToken, "denied.invalid", "/", upPort)
 
 		l.Flush()
 		got = lines(t, out)
@@ -410,7 +410,7 @@ func tunnelTraffic(t *testing.T, addr, echoPort, deadPort string) {
 		t.Fatal(err)
 	}
 	_ = c.Close()
-	if _, _, line := connect(t, addr, "evil.net:"+echoPort, secretToken); !strings.Contains(line, "403") {
+	if _, _, line := connect(t, addr, "denied.invalid:"+echoPort, secretToken); !strings.Contains(line, "403") {
 		t.Fatalf("forbidden: %q", line)
 	}
 	if _, _, line := connect(t, addr, "localhost:"+echoPort, "wrong"); !strings.Contains(line, "407") {
@@ -431,7 +431,7 @@ func TestTunnelInfoLeaksNothing(t *testing.T) {
 		t.Fatalf("want the dial failure as a reason only:\n%s", out.String())
 	}
 	l.Flush()
-	wantAbsent(t, out, "127.0.0.1", "localhost", "evil.net", secretToken, "user", echoPort, deadPort)
+	wantAbsent(t, out, "127.0.0.1", "localhost", "denied.invalid", secretToken, "user", echoPort, deadPort)
 }
 
 func TestTunnelDebugOneLinePerRequest(t *testing.T) {
