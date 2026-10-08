@@ -81,6 +81,12 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		proxy.WriteJSON(w, http.StatusMethodNotAllowed, "method_not_allowed", "CONNECT is not supported in route mode")
 		return
 	}
+	if route.HasDotSegment(r.URL.EscapedPath()) {
+		// Prefixes are routing, not a boundary: a dot segment would escape rewrite_prefix (#61).
+		obs.Reject(metrics.RejectBadPath)
+		proxy.WriteJSON(w, http.StatusBadRequest, "bad_path", "path contains a dot segment")
+		return
+	}
 	idx := route.Match(h.routes, r.Host, r.URL.Path)
 	if idx < 0 {
 		obs.Reject(metrics.RejectNoRoute)

@@ -34,6 +34,7 @@ const (
 	RejectMethodNotAllowed Rejection = "method_not_allowed"
 	RejectNoRoute          Rejection = "no_route"
 	RejectBadHops          Rejection = "bad_hops"
+	RejectBadPath          Rejection = "bad_path"
 	RejectLoopDetected     Rejection = "loop_detected"
 	RejectShuttingDown     Rejection = "shutting_down"
 	RejectTunnelCapacity   Rejection = "tunnel_capacity"

@@ -45,6 +45,7 @@ The single authoritative list. A Go test fails when a code the handlers emit is 
 | `no_route` | 404 | route | No route matches host and path. |
 | `method_not_allowed` | 405 | route, tunnel | Route mode: `CONNECT`. Tunnel: anything except `CONNECT` (sets `Allow: CONNECT`). |
 | `body_too_large` | 413 | header, path, route | Request body above `UPSTREAM_MAX_BYTES`. |
+| `bad_path` | 400 | route | A path segment is `.` or `..` (also percent-encoded). |
 | `bad_hops` | 400 | route | `X-L7-Hops` is not an integer `>= 0`. |
 | `loop_detected` | 508 | route | Incoming hops `>= ROUTE_MAX_HOPS`. |
 | `upstream_timeout` | 504 | header, path, route, tunnel | Upstream dial or response timed out. |
@@ -144,6 +145,7 @@ Client sends an ordinary request; the proxy picks the upstream from the `Host` h
 | Check | Status / `error` | `detail` |
 |---|---|---|
 | Method is `CONNECT` | `405 method_not_allowed` | `CONNECT is not supported in route mode` |
+| Path has a `.` or `..` segment (also `%2e`, `%2E`) | `400 bad_path` | `path contains a dot segment` |
 | No route matches host + path | `404 no_route` | `no matching route` |
 | `X-L7-Hops` is not an integer `>= 0` | `400 bad_hops` | `invalid X-L7-Hops` |
 | Incoming hops `>= ROUTE_MAX_HOPS` | `508 loop_detected` | `hop limit exceeded` |

@@ -9,6 +9,19 @@ import (
 	"strings"
 )
 
+// HasDotSegment reports whether an escaped URL path has a "." or ".." segment,
+// including percent-encoded forms (%2e, %2E). Paths are never normalised, so route
+// mode refuses such a path rather than let it escape a rewrite prefix (#61).
+func HasDotSegment(escapedPath string) bool {
+	for _, seg := range strings.Split(escapedPath, "/") {
+		seg = strings.ReplaceAll(strings.ToLower(seg), "%2e", ".")
+		if seg == "." || seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // Route is a validated static route entry.
 type Route struct {
 	Host          string
