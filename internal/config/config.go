@@ -418,6 +418,11 @@ func (c Config) Warnings() []string {
 	if c.ProxyMode == ProxyModeRoute && len(c.MetricsIngressHosts) > 0 {
 		w = append(w, "METRICS_INGRESS_HOSTS is ignored in route mode: ingress_host comes from ROUTES")
 	}
+	for _, rt := range c.Routes {
+		if rt.Warning != "" {
+			w = append(w, rt.Warning)
+		}
+	}
 	return w
 }
 
