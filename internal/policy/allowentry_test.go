@@ -13,7 +13,7 @@ func TestPolicyAllowEntry(t *testing.T) {
 		{"API.example.com.:443", "api.example.com"},
 		{"www.example.org", ".example.org"},
 		{"example.org", ".example.org"},
-		{"evil.net", ""},
+		{"denied.invalid", ""},
 		{"", ""},
 	} {
 		if got := p.AllowEntry(tc.in); got != tc.want {

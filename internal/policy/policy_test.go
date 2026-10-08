@@ -19,7 +19,7 @@ func TestPolicySuffix(t *testing.T) {
 	if !p.Allowed("api.example.com") {
 		t.Fatal("suffix should allow")
 	}
-	if p.Allowed("evil.net") {
+	if p.Allowed("denied.invalid") {
 		t.Fatal("suffix should block")
 	}
 }
