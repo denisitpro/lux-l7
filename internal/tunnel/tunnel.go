@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
-	stdlog "log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -22,6 +21,7 @@ import (
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/certs"
 	"github.com/denisitpro/lux-l7/internal/config"
+	"github.com/denisitpro/lux-l7/internal/discardlog"
 	"github.com/denisitpro/lux-l7/internal/egress"
 	"github.com/denisitpro/lux-l7/internal/headers"
 	"github.com/denisitpro/lux-l7/internal/metrics"
@@ -126,7 +126,7 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 		// Empty, non-nil: never negotiate h2 on the TLS listener.
 		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
 		// The default error log prints the client address on handshake failures.
-		ErrorLog: stdlog.New(io.Discard, "", 0),
+		ErrorLog: discardlog.New(),
 	}
 	return s, nil
 }

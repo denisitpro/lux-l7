@@ -14,6 +14,7 @@ import (
 
 	"github.com/denisitpro/lux-l7/internal/auth"
 	"github.com/denisitpro/lux-l7/internal/config"
+	"github.com/denisitpro/lux-l7/internal/discardlog"
 	"github.com/denisitpro/lux-l7/internal/egress"
 	"github.com/denisitpro/lux-l7/internal/headers"
 	"github.com/denisitpro/lux-l7/internal/metrics"
@@ -75,6 +76,8 @@ func New(cfg config.Config, v *auth.Validator, log *slog.Logger, opts ...Option)
 	rp := &httputil.ReverseProxy{
 		Transport: tr,
 		Rewrite:   h.rewrite,
+		// The default error log names the upstream address (body copy failures).
+		ErrorLog: discardlog.New(),
 		// Strips an upstream-sent origin marker; path mode also rewrites redirects.
 		ModifyResponse: h.modifyResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
