@@ -16,6 +16,7 @@ import (
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/front"
 	"github.com/denisitpro/lux-l7/internal/listener"
+	"github.com/denisitpro/lux-l7/internal/listenlog"
 	"github.com/denisitpro/lux-l7/internal/metrics"
 	"github.com/denisitpro/lux-l7/internal/proxy"
 	"github.com/denisitpro/lux-l7/internal/relay"
@@ -70,10 +71,8 @@ func main() {
 	var authValidator *auth.Validator
 	switch cfg.ProxyMode {
 	case config.ProxyModeRoute:
-		logger.Info("proxy mode", "mode", "route", "routes", len(cfg.Routes))
 		appHandler = relay.New(cfg, cfg.Routes, logger, relay.Options{Observer: observer})
 	default:
-		logger.Info("proxy mode", "mode", string(cfg.ProxyMode))
 		authValidator, err = auth.New(cfg)
 		if err != nil {
 			logger.Error("auth", "err", err)
@@ -95,14 +94,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Bind first, log after: "listening" must never precede a failed bind.
+	// Bind first, log after: "listener up" must never precede a failed bind.
 	ln, err := bind.Listen(cfg.HTTPAddr)
 	if err != nil {
 		logger.Error("listen", "err", err)
 		os.Exit(1)
 	}
 	go func() {
-		logger.Info("listening", "addr", cfg.HTTPAddr, "tls", cfg.HTTPTLSCertFile != "", "h2c", cfg.HTTPH2C && cfg.HTTPTLSCertFile == "")
+		mainTLS := cfg.HTTPTLSCertFile != ""
+		extra := []any{"h2c", cfg.HTTPH2C && !mainTLS}
+		if cfg.ProxyMode == config.ProxyModeRoute {
+			extra = append(extra, "routes", len(cfg.Routes))
+		}
+		listenlog.Up(logger, "main", cfg.HTTPAddr, string(cfg.ProxyMode), mainTLS, extra...)
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("listen", "err", err)
 			os.Exit(1)
@@ -122,7 +126,7 @@ func main() {
 			os.Exit(1)
 		}
 		go func() {
-			logger.Info("tunnel listening", "addr", cfg.TunnelAddr)
+			listenlog.Up(logger, "tunnel", cfg.TunnelAddr, "tunnel", cfg.TunnelTLSCertFile != "")
 			if err := tun.Serve(tunLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error("tunnel listen", "err", err)
 				os.Exit(1)
