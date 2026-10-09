@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/denisitpro/lux-l7/internal/auth"
+	"github.com/denisitpro/lux-l7/internal/bind"
 	"github.com/denisitpro/lux-l7/internal/config"
 	"github.com/denisitpro/lux-l7/internal/front"
 	"github.com/denisitpro/lux-l7/internal/listener"
@@ -94,9 +95,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Bind first, log after: "listening" must never precede a failed bind.
+	ln, err := bind.Listen(cfg.HTTPAddr)
+	if err != nil {
+		logger.Error("listen", "err", err)
+		os.Exit(1)
+	}
 	go func() {
 		logger.Info("listening", "addr", cfg.HTTPAddr, "tls", cfg.HTTPTLSCertFile != "", "h2c", cfg.HTTPH2C && cfg.HTTPTLSCertFile == "")
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("listen", "err", err)
 			os.Exit(1)
 		}
@@ -109,9 +116,14 @@ func main() {
 			logger.Error("tunnel", "err", err)
 			os.Exit(1)
 		}
+		tunLn, err := bind.Listen(cfg.TunnelAddr)
+		if err != nil {
+			logger.Error("tunnel listen", "err", err)
+			os.Exit(1)
+		}
 		go func() {
 			logger.Info("tunnel listening", "addr", cfg.TunnelAddr)
-			if err := tun.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := tun.Serve(tunLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Error("tunnel listen", "err", err)
 				os.Exit(1)
 			}

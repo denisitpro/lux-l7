@@ -15,7 +15,8 @@ The main listener speaks plain HTTP/1.x by default: end TLS at an ingress or loa
 - **Default:** `:8080`.
 - **Change it when:** the port is taken, or you want to bind to loopback only behind a local sidecar.
 - **Example:** `HTTP_ADDR=127.0.0.1:8080`
-- **If wrong:** the value itself is not checked while loading config: a malformed or busy address makes the process fail when it starts listening. Two listeners on one socket fail startup: `TUNNEL_ADDR` or `METRICS_ADDR` clashing with it is rejected (the clash rule is in [`../configuration.md`](../configuration.md#combinations-that-fail-startup); see also [`tunnel.md`](tunnel.md) and [`metrics.md`](metrics.md)).
+- **Privileged port (below 1024):** with `network_mode: host`, use the `-host` image tag (for example `latest-host`). The `-host` variant cannot start with `cap_drop: ALL` unless `cap_add: NET_BIND_SERVICE` (the default image is unaffected). The same applies to `TUNNEL_ADDR` and `METRICS_ADDR`.
+- **If wrong:** the value itself is not checked while loading config: a malformed or busy address makes the process fail when it starts listening (a permission error names the cause: privileged port, use the `-host` image or a port >= 1024). Two listeners on one socket fail startup: `TUNNEL_ADDR` or `METRICS_ADDR` clashing with it is rejected (the clash rule is in [`../configuration.md`](../configuration.md#combinations-that-fail-startup); see also [`tunnel.md`](tunnel.md) and [`metrics.md`](metrics.md)).
 
 ### `HTTP_TLS_CERT_FILE`, `HTTP_TLS_KEY_FILE`
 

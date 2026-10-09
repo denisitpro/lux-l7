@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/denisitpro/lux-l7/internal/bind"
 	"github.com/denisitpro/lux-l7/internal/discardlog"
 )
 
@@ -54,7 +55,7 @@ func Start(log *slog.Logger, addr string, reg *prometheus.Registry) (*Server, er
 	if addr == "" {
 		return nil, nil
 	}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := bind.Listen(addr)
 	if err != nil {
 		return nil, err
 	}
