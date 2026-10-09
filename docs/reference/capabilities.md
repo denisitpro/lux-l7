@@ -186,6 +186,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 - **What:** one static binary (no cgo) in a multi-stage image on a distroless static non-root base; build identity (build id, commit, ref, build time) is linked in. A pushed git tag publishes the image to Docker Hub with an immutable and a mutable tag plus `latest` (`linux/amd64`). CI on `main` runs build, `go test -race`, golangci-lint and govulncheck; Dependabot tracks Go modules, Docker and Actions.
 - **Enable:** `make docker` locally; tag push in CI. Release rules are in [`../../CLAUDE.md`](../../CLAUDE.md).
+- **`-host` image variant:** every tag also exists with a `-host` suffix (`X.Y.Z-host`, `latest-host`): the same `/service` bytes with the `cap_net_bind_service` file capability, so the non-root user can bind ports below 1024 under `network_mode: host`. Built by `Dockerfile.host` FROM the just-pushed image (pinned by digest); `make docker-host` locally. Cannot start with `cap_drop: ALL` unless `cap_add: NET_BIND_SERVICE`; the default image is unaffected.
 - **Limits:** CI runs only on push to `main`, not on pull requests.
 - **Origin:** [#2](https://github.com/denisitpro/lux-l7/pull/2); base image [#29](https://github.com/denisitpro/lux-l7/pull/29); CI/CD [#35](https://github.com/denisitpro/lux-l7/pull/35).
 

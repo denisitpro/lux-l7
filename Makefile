@@ -12,7 +12,7 @@ IMAGE_TAG := local-$(CI_COMMIT_SHORT_SHA)
 BUILD_ID ?= $(IMAGE_TAG)
 export CI_COMMIT_SHORT_SHA CI_COMMIT_REF_NAME CI_COMMIT_TIMESTAMP IMAGE_TAG BUILD_ID
 
-.PHONY: help run test lint check-go-version docker vuln check
+.PHONY: help run test lint check-go-version docker docker-host vuln check
 
 help:
 	@echo "run              go run ./cmd/lux-l7"
@@ -20,6 +20,7 @@ help:
 	@echo "lint             golangci-lint"
 	@echo "check-go-version assert go.mod matches version.txt"
 	@echo "docker           build the image locally (denisitpro/lux-l7:local-<sha7>)"
+	@echo "docker-host      build the -host variant (file capability) FROM the local image; run make docker first"
 	@echo "vuln             govulncheck ./..."
 	@echo "check            MANDATORY local smoke before reporting done: check-go-version lint test vuln"
 
@@ -49,6 +50,14 @@ docker: check-go-version
 		--build-arg CI_COMMIT_REF_NAME=$(CI_COMMIT_REF_NAME) \
 		--build-arg CI_COMMIT_TIMESTAMP=$(CI_COMMIT_TIMESTAMP) \
 		-t denisitpro/lux-l7:$(IMAGE_TAG) .
+
+# The -host variant is built FROM the image `make docker` produced (same /service bytes, only
+# the file capability differs); it does not recompile Go.
+docker-host:
+	docker build \
+		--build-arg BASE_IMAGE=denisitpro/lux-l7:$(IMAGE_TAG) \
+		-f Dockerfile.host \
+		-t denisitpro/lux-l7:$(IMAGE_TAG)-host .
 
 GOVULNCHECK_VERSION := v1.8.0
 

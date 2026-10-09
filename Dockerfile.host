@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.19
+# check=skip=InvalidDefaultArgInFrom
+# (A no-default ARG in FROM is intentional — a missing BASE_IMAGE must fail the build, as in Dockerfile.)
+# The -host image variant: the base image plus a file capability on /service.
+#   cap   — copies /service out of the base image and runs setcap on it
+#   final — the base image again, with only /service replaced
+#
+# No Go build here: the /service bytes are identical to the base image (a second
+# compile would produce a different binary); only the security.capability xattr differs.
+# cap_net_bind_service lets the non-root user bind ports below 1024, e.g. under
+# network_mode: host. USER and ENTRYPOINT are inherited from the base image.
+#
+# Build FROM an already built image (CI pins it by digest):
+#   make docker-host        (base: the image `make docker` produced)
+#   docker build --build-arg BASE_IMAGE=denisitpro/lux-l7:local-<sha7> \
+#     -f Dockerfile.host -t denisitpro/lux-l7:local-<sha7>-host .
+
+# Build argument — no default on purpose: a missing value must fail the build loudly.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE} AS base
+
+FROM debian:trixie-slim AS cap
+ARG BASE_IMAGE
+RUN test -n "$BASE_IMAGE" || { echo "build-arg BASE_IMAGE is required" >&2; exit 1; }
+RUN apt-get update && apt-get install -y --no-install-recommends libcap2-bin && rm -rf /var/lib/apt/lists/*
+COPY --from=base /service /service
+RUN setcap cap_net_bind_service=+ep /service && getcap /service
+
+# ---------------------------------------------------------------------------
+
+FROM ${BASE_IMAGE}
+COPY --from=cap /service /service
