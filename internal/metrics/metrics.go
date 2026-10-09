@@ -22,6 +22,7 @@ import (
 
 	"github.com/denisitpro/lux-l7/internal/bind"
 	"github.com/denisitpro/lux-l7/internal/discardlog"
+	"github.com/denisitpro/lux-l7/internal/listenlog"
 )
 
 const namespace = "lux_l7"
@@ -73,7 +74,7 @@ func Start(log *slog.Logger, addr string, reg *prometheus.Registry) (*Server, er
 			ErrorLog:          discardlog.New(),
 		},
 	}
-	log.Info("metrics listening", "addr", ln.Addr().String())
+	listenlog.Up(log, "metrics", ln.Addr().String(), "metrics", false)
 	go func() {
 		defer close(s.done)
 		if err := s.http.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
