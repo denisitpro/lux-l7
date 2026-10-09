@@ -3,3 +3,4 @@
 - [Standard conventions](feedback-standard-conventions.md) — standard knobs (LOG_LEVEL) over invented variables/profiles
 - [Sensible defaults](feedback-sensible-defaults.md) — decide trivial defaults yourself, never ask the owner
 - [Public release plan](project-public-release-plan.md) — repo stays private; public version = new repo without history, anonymised first
+- [Deploy contract](project-deploy-contract.md) — pull image + env = works; no host-side tweaks ever
