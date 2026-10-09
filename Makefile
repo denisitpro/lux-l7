@@ -21,7 +21,7 @@ help:
 	@echo "check-go-version assert go.mod matches version.txt"
 	@echo "docker           build the image locally (denisitpro/lux-l7:local-<sha7>)"
 	@echo "docker-host      build the -host variant (file capability) FROM the local image; run make docker first"
-	@echo "vuln            govulncheck ./..."
+	@echo "vuln             govulncheck ./..."
 	@echo "check            MANDATORY local smoke before reporting done: check-go-version lint test vuln"
 
 run:
