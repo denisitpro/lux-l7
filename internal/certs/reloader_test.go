@@ -144,3 +144,17 @@ func TestReloaderWarnsOncePerChange(t *testing.T) {
 		t.Fatalf("reload failure warned %d times, want 1\n%s", n, buf.String())
 	}
 }
+
+func TestStartupLogsCertificateAttributes(t *testing.T) {
+	certFile, keyFile := certstest.SelfSigned(t, t.TempDir(), "log.example.com")
+	var buf bytes.Buffer
+	if _, err := certs.NewReloader("x tls", certFile, keyFile, slog.New(slog.NewTextHandler(&buf, nil))); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"x tls certificate loaded", "key_type=ecdsa", "curve=P-256", "subject_cn=log.example.com", "not_after="} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("log lacks %q:\n%s", want, out)
+		}
+	}
+}

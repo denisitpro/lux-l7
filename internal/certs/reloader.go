@@ -59,7 +59,17 @@ func NewReloader(name, certFile, keyFile string, log *slog.Logger, opts ...Optio
 	r.cert.Store(&cert)
 	r.certMod, r.keyMod = certMod, keyMod
 	r.lastCheck.Store(r.now().UnixNano())
+	r.logCert(" certificate loaded", &cert)
 	return r, nil
+}
+
+// logCert logs the public attributes of cert; key material is never read.
+func (r *Reloader) logCert(msg string, cert *tls.Certificate) {
+	if info, ok := describePair(cert); ok {
+		r.log.Info(r.name+msg, info.Attrs()...)
+		return
+	}
+	r.log.Info(r.name + msg)
 }
 
 func (r *Reloader) mtimes() (cert, key time.Time, err error) {
@@ -102,5 +112,5 @@ func (r *Reloader) reload() {
 		return
 	}
 	r.cert.Store(&cert)
-	r.log.Info(r.name + " certificate reloaded")
+	r.logCert(" certificate reloaded", &cert)
 }
