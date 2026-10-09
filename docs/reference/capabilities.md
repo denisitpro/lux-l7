@@ -178,7 +178,7 @@ One process runs in one mode (`PROXY_MODE`); the tunnel is an extra listener of 
 
 ### Tunnel TLS and certificate reload
 
-- **What:** the tunnel listener can speak TLS 1.2 or higher (ALPN `http/1.1`), so credentials do not cross the network in clear text. The pair is re-read when either file's mtime changes; a failed reload keeps the previous certificate and logs a warning.
+- **What:** the tunnel listener can speak TLS 1.2 or higher (ALPN `http/1.1`), so credentials do not cross the network in clear text. The pair is re-read when either file's mtime changes; a failed reload keeps the previous certificate and logs a warning. Every successful load (startup: `<listener> tls certificate loaded`; reload: `... certificate reloaded`, with `tunnel tls` or `http tls` as the listener prefix) logs the public attributes of the leaf: `key_type` (`rsa`, `ecdsa`, `ed25519`), `key_bits` (RSA), `curve` (ECDSA), `subject_cn`, `sans` (DNS names then IPs, at most 10; `sans_total` when more) and `not_after` (RFC 3339, UTC). Key material is never logged. The main-listener pair (`HTTP_TLS_*`) logs the same way.
 - **Enable:** `TUNNEL_TLS_CERT_FILE` and `TUNNEL_TLS_KEY_FILE`, both or neither (one alone fails startup). Optional but recommended.
 - **Limits:** without them the listener is plain HTTP and logs a startup warning (local tests only). A pair that cannot be loaded at startup fails startup. Reload is checked on handshake (at most once per second), not by a watcher. For TLS on the main listener see Protocol support above.
 - **Origin:** [#32](https://github.com/denisitpro/lux-l7/pull/32).

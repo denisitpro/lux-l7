@@ -58,7 +58,7 @@ Startup rules for a tunnel (any failure exits at startup):
 - **Default:** empty (plain HTTP listener).
 - **Change it when:** always when the tunnel crosses an untrusted network. Plain mode is for local tests.
 - **Example:** `TUNNEL_TLS_CERT_FILE=/etc/lux-l7/tls.crt` and `TUNNEL_TLS_KEY_FILE=/etc/lux-l7/tls.key`
-- **If wrong:** only one of the two set fails startup; an unreadable or mismatching pair fails startup. Without them the tunnel logs a startup warning that credentials travel in clear text. The files are re-read when either one's modification time changes (checked at the next handshake, at most once per second), so a renewed certificate needs no restart; if a reload fails, the previous certificate is kept and a warning is logged. If `TUNNEL_ADDR` is empty the pair is still required to be consistent but is otherwise unused.
+- **If wrong:** only one of the two set fails startup; an unreadable or mismatching pair fails startup. Without them the tunnel logs a startup warning that credentials travel in clear text. The files are re-read when either one's modification time changes (checked at the next handshake, at most once per second), so a renewed certificate needs no restart; if a reload fails, the previous certificate is kept and a warning is logged. Each successful load logs `tunnel tls certificate loaded` (or `reloaded`) with `key_type`, `key_bits` or `curve`, `subject_cn`, `sans` and `not_after`; no key material. If `TUNNEL_ADDR` is empty the pair is still required to be consistent but is otherwise unused.
 
 ## Client side
 
