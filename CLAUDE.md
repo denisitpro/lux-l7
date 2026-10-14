@@ -1,14 +1,18 @@
 # lux-l7 — agent agreements
 
-> Status: living · Last verified: 2026-10-06 · [AI - claude-sonnet-5-5]
+> Status: living · Last verified: 2026-10-14 · [AI - claude-opus-5-5]
 
 ## Public repository — no private identifiers
 
-This repo is **public**. Never commit or write in comments, docs, issues, or PR text:
+This repo is **public** (since 2026-10-14, full history). Never commit or write in comments, docs, issues, or PR text:
 
 - Real production hostnames, IPs, or URLs tied to the owner’s apps or employers
 - Internal project codenames, company names, or neighbor-repo names used as examples
+- Names of the owner's private apps or clients that use the proxy (say "client apps")
 - API keys, tokens, or client secrets (use placeholders like `example.com`, `your-proxy.example`)
+- Verbatim chat quotes from the owner (paraphrase in English in `claude-memory/`)
+
+Before every push, issue, PR or comment, check the diff and the text against this list. Editing an issue or PR body later does not erase the old text: GitHub keeps the edit history public until each revision is deleted in the UI, so get it right the first time.
 
 Use generic examples only (`api.example.com`, `proxy.example.net`). If a fact must stay private, it stays out of git.
 
