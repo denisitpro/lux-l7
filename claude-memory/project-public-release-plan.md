@@ -1,10 +1,10 @@
 ---
 name: project-public-release-plan
-description: lux-l7 stays private; the public version will be a new repo without history, anonymised first
+description: lux-l7 goes public as this same repository, history kept; only cosmetic tidy-up beforehand
 metadata:
   type: project
 ---
 
-Decision 2026-10-08: the repository is not opened for now. When it is time, the owner will publish a NEW repository with no history, after the tracked files are anonymised (no personal e-mail, no names of the owner's other repositories, no chat quotes in claude-memory). Do not rewrite history in this repository and do not spend effort on commit-metadata cleanup here.
+Decision 2026-10-14 (supersedes the 2026-10-08 "new repo without history" plan): this repository itself is switched to public, with its full git history. A pre-publication audit (#110) found no secrets, real hosts or IPs; names of the owner's other repositories and the personal e-mail in old commit metadata are accepted as trivial. Issue bodies that named the owner's private client apps (#23, #24) were rewritten generically.
 
-**How to apply:** keep writing code and docs as if public (no private identifiers), but treat history and commit metadata as out of scope. Related: [[feedback-sensible-defaults]].
+**How to apply:** keep writing code, docs, issues and PR text as public (no private identifiers, no names of the owner's private apps, no raw chat quotes in claude-memory). Do not rewrite history. New commits use the GitHub noreply author address. Related: [[feedback-sensible-defaults]].
